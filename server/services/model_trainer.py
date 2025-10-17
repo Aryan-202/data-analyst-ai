@@ -1,245 +1,348 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List, Optional
-import uuid
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.cluster import KMeans
-from sklearn.metrics import accuracy_score, mean_squared_error, silhouette_score
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.metrics import mean_squared_error, accuracy_score, classification_report
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+import pickle
+import os
+import uuid
+from typing import Dict, Any, List, Optional
 import warnings
 
 warnings.filterwarnings('ignore')
 
-from server.utils.logger import setup_logger
-
-logger = setup_logger()
-
 
 class ModelTrainer:
-    """Handles automated machine learning model training"""
+    def __init__(self, settings):
+        self.settings = settings
+        self.models_storage = "data/models"
+        os.makedirs(self.models_storage, exist_ok=True)
 
-    def __init__(self):
-        self.trained_models = {}
-        self.available_models = {
-            'classification': {
-                'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
-                # Add more classifiers as needed
-            },
+        self.algorithm_map = {
             'regression': {
                 'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
-                # Add more regressors as needed
+                'linear_regression': LinearRegression()
             },
-            'clustering': {
-                'kmeans': KMeans(n_clusters=3, random_state=42),
-                # Add more clustering algorithms as needed
+            'classification': {
+                'random_forest': RandomForestClassifier(n_estimators=100, random_state=42),
+                'logistic_regression': LogisticRegression(random_state=42)
             }
         }
 
-    async def train_model(self, df: pd.DataFrame, target_column: str, problem_type: str,
-                          model_type: str = "auto", test_size: float = 0.2) -> Dict[str, Any]:
-        """Train a machine learning model"""
+    async def train_model(self, file_path: str, target_column: str, problem_type: str,
+                          model_type: str = "auto", test_size: float = 0.2,
+                          time_column: Optional[str] = None) -> Dict[str, Any]:
+        """Train machine learning model"""
+        df = pd.read_csv(file_path)
 
-        try:
-            # Prepare data
-            X, y, feature_names = self._prepare_features(df, target_column, problem_type)
+        # Validate inputs
+        if target_column not in df.columns:
+            raise ValueError(f"Target column '{target_column}' not found in dataset")
 
-            # Handle missing values
-            X = self._handle_missing_values(X)
+        # Prepare data
+        X, y, feature_names, preprocessing_info = await self._prepare_features(df, target_column)
 
-            # Split data
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=42
-            )
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42
+        )
 
-            # Select model
-            model = self._select_model(problem_type, model_type)
+        # Select model
+        model = await self._select_model(problem_type, model_type)
 
-            # Train model
-            model.fit(X_train, y_train)
+        # Train model
+        model.fit(X_train, y_train)
 
-            # Evaluate model
-            performance = self._evaluate_model(model, X_test, y_test, problem_type)
+        # Evaluate model
+        performance = await self._evaluate_model(model, X_test, y_test, problem_type)
 
-            # Get feature importance
-            feature_importance = self._get_feature_importance(model, feature_names, problem_type)
+        # Generate model info
+        model_id = str(uuid.uuid4())
+        model_info = {
+            'model_id': model_id,
+            'problem_type': problem_type,
+            'algorithm': type(model).__name__,
+            'target_column': target_column,
+            'feature_columns': feature_names,
+            'training_samples': len(X_train),
+            'test_samples': len(X_test),
+            'preprocessing': preprocessing_info
+        }
 
-            # Generate predictions sample
-            predictions_sample = self._get_predictions_sample(model, X_test, y_test, problem_type)
-
-            # Store model
-            model_id = str(uuid.uuid4())
-            self.trained_models[model_id] = {
+        # Save model
+        model_path = os.path.join(self.models_storage, f"{model_id}.pkl")
+        with open(model_path, 'wb') as f:
+            pickle.dump({
                 'model': model,
-                'problem_type': problem_type,
-                'target_column': target_column,
-                'feature_names': feature_names,
-                'performance': performance
-            }
+                'model_info': model_info,
+                'preprocessing': preprocessing_info
+            }, f)
 
-            return {
-                'model_id': model_id,
-                'performance': performance,
-                'feature_importance': feature_importance,
-                'predictions_sample': predictions_sample,
-                'model_type': type(model).__name__
-            }
+        return {
+            'model_id': model_id,
+            'model_info': model_info,
+            'performance': performance
+        }
 
-        except Exception as e:
-            logger.error(f"Model training failed: {str(e)}")
-            raise
+    async def predict(self, model_id: str, input_data: List[Dict[str, Any]]) -> List[Any]:
+        """Make predictions using trained model"""
+        model_path = os.path.join(self.models_storage, f"{model_id}.pkl")
 
-    def _prepare_features(self, df: pd.DataFrame, target_column: str, problem_type: str):
-        """Prepare features and target variable"""
+        if not os.path.exists(model_path):
+            raise ValueError(f"Model {model_id} not found")
+
+        # Load model
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+
+        model = model_data['model']
+        preprocessing_info = model_data['preprocessing']
+
+        # Convert input data to DataFrame
+        input_df = pd.DataFrame(input_data)
+
+        # Preprocess input data
+        processed_input = await self._preprocess_predict_data(input_df, preprocessing_info)
+
+        # Make predictions
+        predictions = model.predict(processed_input)
+
+        return predictions.tolist()
+
+    async def get_model_suggestions(self, file_path: str, target_column: str) -> List[Dict[str, Any]]:
+        """Get suggested models for the dataset"""
+        df = pd.read_csv(file_path)
+
+        if target_column not in df.columns:
+            raise ValueError(f"Target column '{target_column}' not found")
+
+        # Determine problem type
+        problem_type = await self._determine_problem_type(df[target_column])
+
+        suggestions = []
+
+        if problem_type == 'regression':
+            suggestions = [
+                {
+                    'algorithm': 'Random Forest',
+                    'type': 'regression',
+                    'description': 'Good for complex relationships, handles non-linearity well',
+                    'suitability': 'high',
+                    'training_time': 'medium'
+                },
+                {
+                    'algorithm': 'Linear Regression',
+                    'type': 'regression',
+                    'description': 'Fast and interpretable, good for linear relationships',
+                    'suitability': 'medium',
+                    'training_time': 'low'
+                }
+            ]
+        elif problem_type == 'classification':
+            suggestions = [
+                {
+                    'algorithm': 'Random Forest',
+                    'type': 'classification',
+                    'description': 'Robust, handles non-linearity, good for complex patterns',
+                    'suitability': 'high',
+                    'training_time': 'medium'
+                },
+                {
+                    'algorithm': 'Logistic Regression',
+                    'type': 'classification',
+                    'description': 'Fast, interpretable, good for binary classification',
+                    'suitability': 'medium',
+                    'training_time': 'low'
+                }
+            ]
+
+        # Add dataset-specific recommendations
+        dataset_info = await self._analyze_dataset_for_modeling(df, target_column)
+
+        for suggestion in suggestions:
+            suggestion.update({
+                'dataset_compatibility': dataset_info,
+                'recommended': suggestion['suitability'] == 'high'
+            })
+
+        return suggestions
+
+    async def _prepare_features(self, df: pd.DataFrame, target_column: str) -> tuple:
+        """Prepare features for modeling"""
         # Separate features and target
         X = df.drop(columns=[target_column])
         y = df[target_column]
 
-        # Handle categorical features
-        X = self._encode_categorical_features(X)
+        preprocessing_info = {}
+        feature_names = list(X.columns)
 
-        # Handle target variable based on problem type
-        if problem_type == 'classification' and y.dtype == 'object':
+        # Handle categorical variables
+        categorical_columns = X.select_dtypes(include=['object']).columns
+        label_encoders = {}
+
+        for col in categorical_columns:
             le = LabelEncoder()
-            y = le.fit_transform(y)
+            X[col] = le.fit_transform(X[col].astype(str))
+            label_encoders[col] = {
+                'classes': le.classes_.tolist(),
+                'type': 'label_encoder'
+            }
 
-        feature_names = X.columns.tolist()
+        preprocessing_info['label_encoders'] = label_encoders
 
-        return X, y, feature_names
+        # Handle missing values
+        numeric_columns = X.select_dtypes(include=[np.number]).columns
+        for col in numeric_columns:
+            if X[col].isnull().any():
+                median_val = X[col].median()
+                X[col].fillna(median_val, inplace=True)
+                preprocessing_info[f'missing_value_{col}'] = {
+                    'method': 'median',
+                    'value': median_val
+                }
 
-    def _encode_categorical_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Encode categorical features"""
-        X_encoded = X.copy()
+        # Scale numeric features
+        scaler = StandardScaler()
+        X[numeric_columns] = scaler.fit_transform(X[numeric_columns])
+        preprocessing_info['scaler'] = {
+            'method': 'standard_scaler',
+            'features': numeric_columns.tolist()
+        }
 
-        for column in X_encoded.select_dtypes(include=['object']).columns:
-            # For simplicity, use label encoding
-            # In production, consider one-hot encoding for low cardinality
-            le = LabelEncoder()
-            X_encoded[column] = le.fit_transform(X_encoded[column].astype(str))
+        # Encode target variable if classification
+        if y.dtype == 'object' or len(y.unique()) < 20:  # Classification
+            le_target = LabelEncoder()
+            y = le_target.fit_transform(y)
+            preprocessing_info['target_encoder'] = {
+                'classes': le_target.classes_.tolist(),
+                'type': 'label_encoder'
+            }
 
-        return X_encoded
+        return X.values, y, feature_names, preprocessing_info
 
-    def _handle_missing_values(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Handle missing values in features"""
-        X_clean = X.copy()
-
-        for column in X_clean.columns:
-            if X_clean[column].isnull().any():
-                if pd.api.types.is_numeric_dtype(X_clean[column]):
-                    X_clean[column] = X_clean[column].fillna(X_clean[column].median())
-                else:
-                    X_clean[column] = X_clean[column].fillna(X_clean[column].mode()[0])
-
-        return X_clean
-
-    def _select_model(self, problem_type: str, model_type: str):
-        """Select appropriate model"""
-        if model_type == 'auto':
-            # Auto-select first available model for the problem type
-            available = self.available_models.get(problem_type, {})
-            if available:
-                model_name = list(available.keys())[0]
-                return available[model_name]
+    async def _select_model(self, problem_type: str, model_type: str):
+        """Select appropriate model based on problem type"""
+        if model_type == "auto":
+            # Default to Random Forest for auto selection
+            if problem_type == 'regression':
+                return self.algorithm_map['regression']['random_forest']
+            elif problem_type == 'classification':
+                return self.algorithm_map['classification']['random_forest']
             else:
-                raise ValueError(f"No models available for problem type: {problem_type}")
+                raise ValueError(f"Unsupported problem type: {problem_type}")
         else:
-            # Select specific model
-            model = self.available_models.get(problem_type, {}).get(model_type)
-            if not model:
-                raise ValueError(f"Model {model_type} not available for {problem_type}")
-            return model
+            # Specific model selection
+            if problem_type in self.algorithm_map and model_type in self.algorithm_map[problem_type]:
+                return self.algorithm_map[problem_type][model_type]
+            else:
+                raise ValueError(f"Unsupported model type: {model_type} for problem type: {problem_type}")
 
-    def _evaluate_model(self, model, X_test, y_test, problem_type: str) -> Dict[str, Any]:
+    async def _evaluate_model(self, model, X_test, y_test, problem_type: str) -> Dict[str, Any]:
         """Evaluate model performance"""
         y_pred = model.predict(X_test)
 
-        metrics = {}
+        performance = {}
 
-        if problem_type == 'classification':
-            metrics['accuracy'] = round(accuracy_score(y_test, y_pred), 4)
-            # Add more classification metrics as needed
+        if problem_type == 'regression':
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
 
-        elif problem_type == 'regression':
-            metrics['mse'] = round(mean_squared_error(y_test, y_pred), 4)
-            metrics['rmse'] = round(np.sqrt(metrics['mse']), 4)
+            performance.update({
+                'mean_squared_error': mse,
+                'root_mean_squared_error': rmse,
+                'r_squared': model.score(X_test, y_test),
+                'mean_absolute_error': np.mean(np.abs(y_test - y_pred))
+            })
 
-        elif problem_type == 'clustering':
-            if len(np.unique(y_pred)) > 1:  # Need at least 2 clusters for silhouette score
-                metrics['silhouette_score'] = round(silhouette_score(X_test, y_pred), 4)
-            metrics['n_clusters'] = len(np.unique(y_pred))
+        elif problem_type == 'classification':
+            accuracy = accuracy_score(y_test, y_pred)
 
-        return metrics
+            performance.update({
+                'accuracy': accuracy,
+                'precision': classification_report(y_test, y_pred, output_dict=True)['weighted avg']['precision'],
+                'recall': classification_report(y_test, y_pred, output_dict=True)['weighted avg']['recall'],
+                'f1_score': classification_report(y_test, y_pred, output_dict=True)['weighted avg']['f1-score']
+            })
 
-    def _get_feature_importance(self, model, feature_names: List[str], problem_type: str) -> Optional[Dict[str, float]]:
-        """Get feature importance if available"""
+        # Feature importance for tree-based models
         if hasattr(model, 'feature_importances_'):
-            importance_dict = dict(zip(feature_names, model.feature_importances_))
-            # Sort by importance
-            return dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10])  # Top 10
-        return None
+            performance['feature_importance'] = {
+                'features': [f"Feature_{i}" for i in range(len(model.feature_importances_))],
+                'importance': model.feature_importances_.tolist()
+            }
 
-    def _get_predictions_sample(self, model, X_test, y_test, problem_type: str) -> List[Any]:
-        """Get sample predictions for demonstration"""
-        try:
-            y_pred = model.predict(X_test)
+        return performance
 
-            # Return first 5 predictions
-            sample_size = min(5, len(y_pred))
-
-            if problem_type == 'classification':
-                return [
-                    {'actual': int(y_test.iloc[i]), 'predicted': int(y_pred[i])}
-                    for i in range(sample_size)
-                ]
-            elif problem_type == 'regression':
-                return [
-                    {'actual': float(y_test.iloc[i]), 'predicted': float(y_pred[i])}
-                    for i in range(sample_size)
-                ]
+    async def _determine_problem_type(self, target_series: pd.Series) -> str:
+        """Determine if problem is regression or classification"""
+        if target_series.dtype in [np.number]:
+            # Check if it's actually classification with numeric labels
+            unique_values = target_series.nunique()
+            if unique_values <= 10:  # Likely classification
+                return 'classification'
             else:
-                return [int(pred) for pred in y_pred[:sample_size]]
+                return 'regression'
+        else:
+            return 'classification'
 
-        except Exception as e:
-            logger.warning(f"Could not generate predictions sample: {str(e)}")
-            return []
-
-    def get_classification_models(self) -> List[str]:
-        """Get available classification models"""
-        return list(self.available_models['classification'].keys())
-
-    def get_regression_models(self) -> List[str]:
-        """Get available regression models"""
-        return list(self.available_models['regression'].keys())
-
-    def get_clustering_models(self) -> List[str]:
-        """Get available clustering models"""
-        return list(self.available_models['clustering'].keys())
-
-    def get_auto_ml_info(self) -> Dict[str, Any]:
-        """Get AutoML capabilities information"""
-        return {
-            'supported_problem_types': ['classification', 'regression', 'clustering'],
-            'auto_feature_engineering': True,
-            'auto_hyperparameter_tuning': False,  # Basic version
-            'cross_validation': False,
-            'ensemble_methods': False
+    async def _analyze_dataset_for_modeling(self, df: pd.DataFrame, target_column: str) -> Dict[str, Any]:
+        """Analyze dataset characteristics for modeling recommendations"""
+        analysis = {
+            'total_samples': len(df),
+            'total_features': len(df.columns) - 1,  # excluding target
+            'numeric_features': len(df.select_dtypes(include=[np.number]).columns) - (
+                1 if df[target_column].dtype in [np.number] else 0),
+            'categorical_features': len(df.select_dtypes(include=['object']).columns),
+            'missing_values': df.isnull().sum().sum(),
+            'class_imbalance': None
         }
 
-    def store_model(self, dataset_id: str, model_results: Dict[str, Any]):
-        """Store model results"""
-        # In production, you might want to save models to disk/database
-        pass
+        # Check for class imbalance in classification
+        if df[target_column].dtype == 'object' or df[target_column].nunique() < 20:
+            value_counts = df[target_column].value_counts()
+            if len(value_counts) > 1:
+                imbalance_ratio = value_counts.iloc[0] / value_counts.iloc[1]
+                analysis['class_imbalance'] = {
+                    'ratio': imbalance_ratio,
+                    'severity': 'high' if imbalance_ratio > 5 else 'medium' if imbalance_ratio > 2 else 'low'
+                }
 
-    def predict(self, model_id: str, data: pd.DataFrame) -> np.ndarray:
-        """Make predictions using a trained model"""
-        if model_id not in self.trained_models:
-            raise ValueError(f"Model {model_id} not found")
+        return analysis
 
-        model_info = self.trained_models[model_id]
-        model = model_info['model']
+    async def _preprocess_predict_data(self, input_df: pd.DataFrame, preprocessing_info: Dict) -> np.ndarray:
+        """Preprocess input data for prediction using saved preprocessing info"""
+        X = input_df.copy()
 
-        # Preprocess data same as training
-        X = self._encode_categorical_features(data)
-        X = self._handle_missing_values(X)
+        # Apply label encoding
+        if 'label_encoders' in preprocessing_info:
+            for col, encoder_info in preprocessing_info['label_encoders'].items():
+                if col in X.columns:
+                    le = LabelEncoder()
+                    le.classes_ = np.array(encoder_info['classes'])
 
-        return model.predict(X)
+                    # Handle unseen categories
+                    X[col] = X[col].astype(str)
+                    unseen_mask = ~X[col].isin(encoder_info['classes'])
+                    if unseen_mask.any():
+                        # Replace unseen categories with most frequent
+                        X.loc[unseen_mask, col] = encoder_info['classes'][0]
+
+                    X[col] = le.transform(X[col])
+
+        # Handle missing values
+        numeric_columns = X.select_dtypes(include=[np.number]).columns
+        for col in numeric_columns:
+            if f'missing_value_{col}' in preprocessing_info:
+                fill_value = preprocessing_info[f'missing_value_{col}']['value']
+                X[col].fillna(fill_value, inplace=True)
+
+        # Apply scaling
+        if 'scaler' in preprocessing_info:
+            scaler_info = preprocessing_info['scaler']
+            X[scaler_info['features']] = (X[scaler_info['features']] - np.mean(X[scaler_info['features']],
+                                                                               axis=0)) / np.std(
+                X[scaler_info['features']], axis=0)
+
+        return X.values
