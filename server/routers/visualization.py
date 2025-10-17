@@ -1,62 +1,120 @@
-from fastapi import APIRouter, HTTPException
-from models.dataset_schema import VisualizationRequest, VisualizationResponse
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import Response
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+import json
+
 from services.visualization_engine import VisualizationEngine
-from services.data_loader import DataLoader
-from utils.logger import setup_logger
+from services.file_manager import FileManager
+from config import get_settings, Settings
 
 router = APIRouter()
-logger = setup_logger()
-viz_engine = VisualizationEngine()
-data_loader = DataLoader()
 
 
-@router.post("/generate", response_model=VisualizationResponse)
-async def generate_visualizations(request: VisualizationRequest):
+class VisualizationRequest(BaseModel):
+    file_id: str
+    chart_type: str
+    x_axis: Optional[str] = None
+    y_axis: Optional[str] = None
+    color_by: Optional[str] = None
+    filters: Optional[Dict[str, Any]] = None
+
+
+class AutoVisualizationRequest(BaseModel):
+    file_id: str
+    max_charts: int = 6
+
+
+@router.post("/visualize")
+async def create_visualization(
+        request: VisualizationRequest,
+        settings: Settings = Depends(get_settings)
+):
     """
-    Generate visualizations for a dataset
+    Create specific visualization
     """
     try:
-        # Load dataset
-        df = data_loader.load_dataset_by_id(request.dataset_id)
-        if df is None:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+        file_manager = FileManager(settings)
+        viz_engine = VisualizationEngine()
 
-        # Generate visualizations
-        if request.chart_type:
-            # Specific chart request
-            charts = await viz_engine.generate_specific_chart(
-                df,
-                request.chart_type,
-                request.x_axis,
-                request.y_axis,
-                request.color_by
-            )
-        else:
-            # Auto-generate charts
-            charts = await viz_engine.auto_generate_charts(df)
+        file_path = file_manager.get_file_path(request.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
-        # Extract insights from charts
-        insights = viz_engine.extract_insights_from_charts(charts, df)
-
-        logger.info(f"Generated {len(charts)} visualizations for dataset: {request.dataset_id}")
-
-        return VisualizationResponse(
-            dataset_id=request.dataset_id,
-            charts=charts,
-            insights=insights
+        # Create visualization
+        chart_data = await viz_engine.create_chart(
+            file_path,
+            request.chart_type,
+            request.x_axis,
+            request.y_axis,
+            request.color_by,
+            request.filters
         )
 
-    except HTTPException:
-        raise
+        return {
+            "success": True,
+            "chart_type": request.chart_type,
+            "chart_data": chart_data
+        }
+
     except Exception as e:
-        logger.error(f"Error generating visualizations: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Visualization generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Visualization failed: {str(e)}")
 
 
-@router.get("/chart-types")
-async def get_available_chart_types():
-    """Get available chart types and their requirements"""
-    return {
-        "available_chart_types": viz_engine.get_available_chart_types(),
-        "auto_chart_selection_criteria": viz_engine.get_chart_selection_criteria()
-    }
+@router.post("/auto-visualize")
+async def auto_generate_visualizations(
+        request: AutoVisualizationRequest,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Automatically generate meaningful visualizations
+    """
+    try:
+        file_manager = FileManager(settings)
+        viz_engine = VisualizationEngine()
+
+        file_path = file_manager.get_file_path(request.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Auto-generate visualizations
+        charts = await viz_engine.auto_generate_charts(
+            file_path,
+            request.max_charts
+        )
+
+        return {
+            "success": True,
+            "message": f"Generated {len(charts)} visualizations",
+            "charts": charts
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auto-visualization failed: {str(e)}")
+
+
+@router.get("/chart-types/{file_id}")
+async def get_suggested_chart_types(
+        file_id: str,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Get suggested chart types for the dataset
+    """
+    try:
+        file_manager = FileManager(settings)
+        viz_engine = VisualizationEngine()
+
+        file_path = file_manager.get_file_path(file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        suggestions = await viz_engine.get_chart_suggestions(file_path)
+
+        return {
+            "file_id": file_id,
+            "suggested_charts": suggestions
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

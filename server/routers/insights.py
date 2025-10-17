@@ -1,88 +1,95 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from datetime import datetime
-from server.models.dataset_schema import InsightRequest, InsightResponse
-from server.services.insight_generator import InsightGenerator
-from server.services.data_loader import DataLoader
-from server.utils.logger import setup_logger
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+
+from services.insight_generator import InsightGenerator
+from services.file_manager import FileManager
+from config import get_settings, Settings
 
 router = APIRouter()
-logger = setup_logger()
-insight_generator = InsightGenerator()
-data_loader = DataLoader()
 
 
-@router.post("/generate", response_model=InsightResponse)
+class InsightRequest(BaseModel):
+    file_id: str
+    analysis_types: List[str] = ["trends", "correlations", "anomalies", "summary"]
+    focus_areas: Optional[List[str]] = None
+
+
+class ChatRequest(BaseModel):
+    file_id: str
+    question: str
+    conversation_history: Optional[List[Dict[str, str]]] = None
+
+
+class InsightResponse(BaseModel):
+    success: bool
+    message: str
+    insights: Dict[str, Any]
+
+
+@router.post("/generate-insights", response_model=InsightResponse)
 async def generate_insights(
-        background_tasks: BackgroundTasks,
-        request: InsightRequest
+        request: InsightRequest,
+        settings: Settings = Depends(get_settings)
 ):
     """
-    Generate AI-powered insights from dataset
+    Generate AI-powered insights from data
     """
     try:
-        # Load dataset
-        df = data_loader.load_dataset_by_id(request.dataset_id)
-        if df is None:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+        file_manager = FileManager(settings)
+        insight_generator = InsightGenerator(settings)
 
-        # Load EDA results if available
-        eda_results = None
-        # You might want to check if EDA was already performed
+        file_path = file_manager.get_file_path(request.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
         # Generate insights
-        insights_data = await insight_generator.generate_comprehensive_insights(
-            df,
-            request.analysis_type,
-            request.focus_areas or [],
-            eda_results
+        insights = await insight_generator.generate_comprehensive_insights(
+            file_path,
+            request.analysis_types,
+            request.focus_areas
         )
-
-        # Store insights (in background)
-        background_tasks.add_task(
-            insight_generator.store_insights,
-            request.dataset_id, insights_data
-        )
-
-        logger.info(f"Insights generated for dataset: {request.dataset_id}")
 
         return InsightResponse(
-            dataset_id=request.dataset_id,
-            insights=insights_data.get("insights", []),
-            key_findings=insights_data.get("key_findings", []),
-            recommendations=insights_data.get("recommendations", []),
-            generated_at=datetime.now()
+            success=True,
+            message="Insights generated successfully",
+            insights=insights
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error generating insights: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Insight generation failed: {str(e)}")
 
 
 @router.post("/chat")
-async def chat_with_data(dataset_id: str, question: str):
+async def chat_with_data(
+        request: ChatRequest,
+        settings: Settings = Depends(get_settings)
+):
     """
-    Chat interface for asking questions about the data
+    Chat interface for asking questions about data
     """
     try:
-        # Load dataset
-        df = data_loader.load_dataset_by_id(dataset_id)
-        if df is None:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+        file_manager = FileManager(settings)
+        insight_generator = InsightGenerator(settings)
 
-        # Generate answer using AI
-        answer = await insight_generator.answer_question(df, question)
+        file_path = file_manager.get_file_path(request.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # Get answer from AI
+        response = await insight_generator.answer_question(
+            file_path,
+            request.question,
+            request.conversation_history
+        )
 
         return {
-            "dataset_id": dataset_id,
-            "question": question,
-            "answer": answer,
-            "timestamp": datetime.now()
+            "success": True,
+            "question": request.question,
+            "answer": response['answer'],
+            "supporting_data": response.get('supporting_data'),
+            "suggested_followups": response.get('suggested_followups', [])
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error in chat with data: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to answer question: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")

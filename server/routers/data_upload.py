@@ -1,95 +1,93 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi.responses import JSONResponse
 import pandas as pd
 import os
+from typing import Optional
 import uuid
-from typing import List
 
-from config import settings
-from models.dataset_schema import DataUploadResponse, FileType
-from server.services.file_manager import FileManager
-from server.services.data_loader import DataLoader
-from server.utils.logger import setup_logger
+from services.data_loader import DataLoader
+from services.file_manager import FileManager
+from models.dataset_schema import DatasetInfo, UploadResponse
+from config import get_settings, Settings
 
 router = APIRouter()
-logger = setup_logger()
-file_manager = FileManager()
-data_loader = DataLoader()
 
 
-@router.post("/upload", response_model=DataUploadResponse)
-async def upload_dataset(
-        background_tasks: BackgroundTasks,
-        file: UploadFile = File(...)
+@router.post("/upload", response_model=UploadResponse)
+async def upload_file(
+        file: UploadFile = File(...),
+        settings: Settings = Depends(get_settings)
 ):
     """
-    Upload a dataset file (CSV, Excel, JSON)
+    Upload CSV, Excel, or JSON files for analysis
     """
     try:
+        file_manager = FileManager(settings)
+        data_loader = DataLoader()
+
         # Validate file type
-        file_extension = os.path.splitext(file.filename)[1].lower()
-        if file_extension not in settings.ALLOWED_EXTENSIONS:
+        if not file_manager.is_valid_file_type(file.filename):
             raise HTTPException(
                 status_code=400,
-                detail=f"File type {file_extension} not supported. Allowed: {settings.ALLOWED_EXTENSIONS}"
+                detail=f"File type not supported. Allowed: {settings.allowed_file_types}"
             )
 
-        # Generate unique dataset ID
-        dataset_id = str(uuid.uuid4())
+        # Generate unique file ID
+        file_id = str(uuid.uuid4())
 
-        # Save file
-        file_path = await file_manager.save_uploaded_file(file, dataset_id)
+        # Save uploaded file
+        file_path = await file_manager.save_uploaded_file(file, file_id)
 
-        # Load and validate data
-        df, file_type = await data_loader.load_dataset(file_path, file_extension)
+        # Load data
+        df = await data_loader.load_data(file_path)
 
-        # Get basic info
-        rows, columns = df.shape
-        columns_info = data_loader.get_columns_info(df)
-
-        # Store dataset metadata (in background)
-        background_tasks.add_task(
-            data_loader.store_dataset_metadata,
-            dataset_id, file.filename, file_type, df
+        # Get dataset info
+        dataset_info = DatasetInfo(
+            file_id=file_id,
+            filename=file.filename,
+            file_path=file_path,
+            file_size=os.path.getsize(file_path),
+            rows=len(df),
+            columns=len(df.columns),
+            column_names=list(df.columns),
+            data_types=df.dtypes.astype(str).to_dict()
         )
 
-        logger.info(f"Dataset uploaded: {file.filename}, ID: {dataset_id}")
-
-        return DataUploadResponse(
-            dataset_id=dataset_id,
-            filename=file.filename,
-            file_type=file_type,
-            rows=rows,
-            columns=columns,
-            columns_info=columns_info,
-            message="Dataset uploaded successfully"
+        return UploadResponse(
+            success=True,
+            message="File uploaded successfully",
+            dataset_info=dataset_info
         )
 
     except Exception as e:
-        logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-@router.get("/datasets")
-async def list_datasets():
-    """List all uploaded datasets"""
+@router.get("/datasets/{file_id}/preview")
+async def preview_data(
+        file_id: str,
+        rows: int = 10,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Preview uploaded dataset
+    """
     try:
-        datasets = data_loader.list_available_datasets()
-        return {"datasets": datasets}
-    except Exception as e:
-        logger.error(f"Error listing datasets: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to list datasets")
+        file_manager = FileManager(settings)
+        data_loader = DataLoader()
 
+        file_path = file_manager.get_file_path(file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
-@router.get("/datasets/{dataset_id}")
-async def get_dataset_info(dataset_id: str):
-    """Get information about a specific dataset"""
-    try:
-        dataset_info = data_loader.get_dataset_info(dataset_id)
-        if not dataset_info:
-            raise HTTPException(status_code=404, detail="Dataset not found")
-        return dataset_info
-    except HTTPException:
-        raise
+        df = await data_loader.load_data(file_path)
+
+        return {
+            "file_id": file_id,
+            "preview": df.head(rows).to_dict(orient="records"),
+            "columns": list(df.columns),
+            "shape": {"rows": len(df), "columns": len(df.columns)}
+        }
+
     except Exception as e:
-        logger.error(f"Error getting dataset info: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to get dataset info")
+        raise HTTPException(status_code=500, detail=str(e))

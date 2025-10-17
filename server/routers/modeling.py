@@ -1,76 +1,128 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from server.models.dataset_schema import ModelingRequest, ModelingResponse
-from server.services.model_trainer import ModelTrainer
-from server.services.data_loader import DataLoader
-from server.utils.logger import setup_logger
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Dict, Any, Optional, List
+import os
+
+from services.model_trainer import ModelTrainer
+from services.file_manager import FileManager
+from config import get_settings, Settings
 
 router = APIRouter()
-logger = setup_logger()
-model_trainer = ModelTrainer()
-data_loader = DataLoader()
 
 
-@router.post("/train", response_model=ModelingResponse)
+class ModelTrainingRequest(BaseModel):
+    file_id: str
+    target_column: str
+    problem_type: str  # regression, classification, forecasting
+    model_type: str = "auto"  # auto, specific model name
+    test_size: float = 0.2
+    time_column: Optional[str] = None  # for forecasting
+
+
+class PredictionRequest(BaseModel):
+    model_id: str
+    input_data: List[Dict[str, Any]]
+
+
+class TrainingResponse(BaseModel):
+    success: bool
+    message: str
+    model_id: str
+    model_info: Dict[str, Any]
+    performance: Dict[str, Any]
+
+
+@router.post("/train", response_model=TrainingResponse)
 async def train_model(
-        background_tasks: BackgroundTasks,
-        request: ModelingRequest
+        request: ModelTrainingRequest,
+        settings: Settings = Depends(get_settings)
 ):
     """
-    Train a machine learning model on the dataset
+    Train machine learning model
     """
     try:
-        # Load dataset
-        df = data_loader.load_dataset_by_id(request.dataset_id)
-        if df is None:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+        file_manager = FileManager(settings)
+        model_trainer = ModelTrainer(settings)
 
-        # Validate target column
-        if request.target_column not in df.columns:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Target column '{request.target_column}' not found in dataset"
-            )
+        file_path = file_manager.get_file_path(request.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
         # Train model
-        model_results = await model_trainer.train_model(
-            df,
+        training_result = await model_trainer.train_model(
+            file_path,
             request.target_column,
             request.problem_type,
             request.model_type,
-            request.test_size
+            request.test_size,
+            request.time_column
         )
 
-        # Store model (in background)
-        background_tasks.add_task(
-            model_trainer.store_model,
-            request.dataset_id, model_results
+        return TrainingResponse(
+            success=True,
+            message="Model training completed successfully",
+            model_id=training_result['model_id'],
+            model_info=training_result['model_info'],
+            performance=training_result['performance']
         )
 
-        logger.info(f"Model trained for dataset: {request.dataset_id}")
-
-        return ModelingResponse(
-            dataset_id=request.dataset_id,
-            model_id=model_results.get("model_id"),
-            problem_type=request.problem_type,
-            target_column=request.target_column,
-            model_performance=model_results.get("performance", {}),
-            feature_importance=model_results.get("feature_importance"),
-            predictions_sample=model_results.get("predictions_sample", [])
-        )
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error training model: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Model training failed: {str(e)}")
 
 
-@router.get("/model-types")
-async def get_available_models():
-    """Get available model types for different problems"""
-    return {
-        "classification_models": model_trainer.get_classification_models(),
-        "regression_models": model_trainer.get_regression_models(),
-        "clustering_models": model_trainer.get_clustering_models(),
-        "auto_ml_capabilities": model_trainer.get_auto_ml_info()
-    }
+@router.post("/predict")
+async def make_prediction(
+        request: PredictionRequest,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Make predictions using trained model
+    """
+    try:
+        model_trainer = ModelTrainer(settings)
+
+        predictions = await model_trainer.predict(
+            request.model_id,
+            request.input_data
+        )
+
+        return {
+            "success": True,
+            "model_id": request.model_id,
+            "predictions": predictions
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+@router.get("/models/{file_id}/suggestions")
+async def get_model_suggestions(
+        file_id: str,
+        target_column: str,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Get suggested models for the dataset
+    """
+    try:
+        file_manager = FileManager(settings)
+        model_trainer = ModelTrainer(settings)
+
+        file_path = file_manager.get_file_path(file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        suggestions = await model_trainer.get_model_suggestions(
+            file_path,
+            target_column
+        )
+
+        return {
+            "file_id": file_id,
+            "target_column": target_column,
+            "suggested_models": suggestions
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

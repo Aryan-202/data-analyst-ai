@@ -1,287 +1,227 @@
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-from typing import Dict, Any, List, Optional
-import base64
-import io
-from server.utils.logger import setup_logger
+from scipy import stats
+from typing import Dict, Any, List
+import warnings
 
-logger = setup_logger()
+warnings.filterwarnings('ignore')
 
 
-class VisualizationEngine:
-    """Generates automatic visualizations and charts"""
-
+class EDAEngine:
     def __init__(self):
-        self.chart_templates = {
-            'distribution': self._create_distribution_chart,
-            'correlation': self._create_correlation_chart,
-            'timeseries': self._create_timeseries_chart,
-            'categorical': self._create_categorical_chart,
-            'scatter': self._create_scatter_plot,
-            'box': self._create_box_plot
+        self.analysis_methods = {
+            'summary': self._generate_summary,
+            'correlation': self._analyze_correlations,
+            'outliers': self._detect_outliers,
+            'distributions': self._analyze_distributions,
+            'trends': self._analyze_trends
         }
 
-    async def auto_generate_charts(self, df: pd.DataFrame, max_charts: int = 8) -> List[Dict[str, Any]]:
-        """Automatically generate relevant charts based on data types"""
-        charts = []
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
-        datetime_cols = df.select_dtypes(include=['datetime']).columns.tolist()
+    async def analyze_dataset(self, file_path: str, analysis_types: List[str]) -> Dict[str, Any]:
+        """Perform comprehensive EDA"""
+        df = pd.read_csv(file_path)
+        results = {}
 
-        # 1. Distribution charts for numeric columns
-        for col in numeric_cols[:3]:  # First 3 numeric columns
-            chart = await self._create_distribution_chart(df, col)
-            if chart:
-                charts.append(chart)
+        for analysis_type in analysis_types:
+            if analysis_type in self.analysis_methods:
+                results[analysis_type] = await self.analysis_methods[analysis_type](df)
 
-        # 2. Correlation heatmap if enough numeric columns
-        if len(numeric_cols) >= 2:
-            chart = await self._create_correlation_chart(df)
-            if chart:
-                charts.append(chart)
+        return results
 
-        # 3. Categorical charts
-        for col in categorical_cols[:2]:  # First 2 categorical columns
-            chart = await self._create_categorical_chart(df, col)
-            if chart:
-                charts.append(chart)
+    async def get_basic_summary(self, file_path: str) -> Dict[str, Any]:
+        """Get basic dataset summary"""
+        df = pd.read_csv(file_path)
+        return await self._generate_summary(df)
 
-        # 4. Timeseries if datetime column exists
-        if datetime_cols and numeric_cols:
-            for date_col in datetime_cols[:1]:
-                for num_col in numeric_cols[:1]:
-                    chart = await self._create_timeseries_chart(df, date_col, num_col)
-                    if chart:
-                        charts.append(chart)
+    async def _generate_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Generate comprehensive summary statistics"""
+        summary = {
+            'dataset_info': {
+                'rows': len(df),
+                'columns': len(df.columns),
+                'memory_usage': df.memory_usage(deep=True).sum()
+            },
+            'column_stats': {},
+            'missing_values': df.isnull().sum().to_dict(),
+            'data_types': df.dtypes.astype(str).to_dict()
+        }
 
-        # 5. Scatter plot for correlated numeric columns
-        if len(numeric_cols) >= 2:
-            chart = await self._create_scatter_plot(df, numeric_cols[0], numeric_cols[1])
-            if chart:
-                charts.append(chart)
+        for column in df.columns:
+            col_data = df[column]
+            col_stats = {
+                'data_type': str(col_data.dtype),
+                'unique_values': col_data.nunique(),
+                'missing_values': col_data.isnull().sum(),
+                'missing_percentage': (col_data.isnull().sum() / len(col_data)) * 100
+            }
 
-        return charts[:max_charts]
-
-    async def generate_specific_chart(self, df: pd.DataFrame, chart_type: str,
-                                      x_axis: Optional[str] = None, y_axis: Optional[str] = None,
-                                      color_by: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Generate specific chart type"""
-        if chart_type in self.chart_templates:
-            chart_func = self.chart_templates[chart_type]
-            chart = await chart_func(df, x_axis, y_axis, color_by)
-            return [chart] if chart else []
-        else:
-            logger.warning(f"Unknown chart type: {chart_type}")
-            return []
-
-    async def _create_distribution_chart(self, df: pd.DataFrame, column: str, **kwargs) -> Dict[str, Any]:
-        """Create distribution chart (histogram)"""
-        if column not in df.columns or not pd.api.types.is_numeric_dtype(df[column]):
-            return None
-
-        try:
-            fig = px.histogram(df, x=column, title=f"Distribution of {column}",
-                               labels={column: column}, opacity=0.7)
-            fig.update_layout(showlegend=False)
-
-            return self._format_chart_response(fig, "distribution", f"histogram_{column}")
-        except Exception as e:
-            logger.error(f"Error creating distribution chart: {str(e)}")
-            return None
-
-    async def _create_correlation_chart(self, df: pd.DataFrame, **kwargs) -> Dict[str, Any]:
-        """Create correlation heatmap"""
-        numeric_df = df.select_dtypes(include=[np.number])
-        if len(numeric_df.columns) < 2:
-            return None
-
-        try:
-            corr_matrix = numeric_df.corr()
-
-            fig = go.Figure(data=go.Heatmap(
-                z=corr_matrix.values,
-                x=corr_matrix.columns,
-                y=corr_matrix.columns,
-                colorscale='RdBu',
-                zmid=0,
-                text=corr_matrix.round(2).values,
-                texttemplate='%{text}',
-                hoverinfo='text'
-            ))
-
-            fig.update_layout(
-                title="Correlation Heatmap",
-                xaxis_title="Columns",
-                yaxis_title="Columns"
-            )
-
-            return self._format_chart_response(fig, "correlation", "correlation_heatmap")
-        except Exception as e:
-            logger.error(f"Error creating correlation chart: {str(e)}")
-            return None
-
-    async def _create_timeseries_chart(self, df: pd.DataFrame, date_column: str, value_column: str, **kwargs) -> Dict[
-        str, Any]:
-        """Create timeseries chart"""
-        if date_column not in df.columns or value_column not in df.columns:
-            return None
-
-        if not pd.api.types.is_datetime64_any_dtype(df[date_column]):
-            return None
-
-        try:
-            fig = px.line(df, x=date_column, y=value_column,
-                          title=f"{value_column} over Time")
-
-            return self._format_chart_response(fig, "timeseries", f"timeseries_{value_column}")
-        except Exception as e:
-            logger.error(f"Error creating timeseries chart: {str(e)}")
-            return None
-
-    async def _create_categorical_chart(self, df: pd.DataFrame, column: str, **kwargs) -> Dict[str, Any]:
-        """Create categorical bar chart"""
-        if column not in df.columns or df[column].dtype != 'object':
-            return None
-
-        try:
-            value_counts = df[column].value_counts().head(10)  # Top 10 categories
-
-            fig = px.bar(x=value_counts.index, y=value_counts.values,
-                         title=f"Top Categories in {column}",
-                         labels={'x': column, 'y': 'Count'})
-
-            return self._format_chart_response(fig, "categorical", f"bar_{column}")
-        except Exception as e:
-            logger.error(f"Error creating categorical chart: {str(e)}")
-            return None
-
-    async def _create_scatter_plot(self, df: pd.DataFrame, x_col: str, y_col: str, color_by: Optional[str] = None,
-                                   **kwargs) -> Dict[str, Any]:
-        """Create scatter plot"""
-        if x_col not in df.columns or y_col not in df.columns:
-            return None
-
-        if not (pd.api.types.is_numeric_dtype(df[x_col]) and pd.api.types.is_numeric_dtype(df[y_col])):
-            return None
-
-        try:
-            if color_by and color_by in df.columns:
-                fig = px.scatter(df, x=x_col, y=y_col, color=color_by,
-                                 title=f"{y_col} vs {x_col}")
+            if pd.api.types.is_numeric_dtype(col_data):
+                col_stats.update({
+                    'mean': col_data.mean(),
+                    'median': col_data.median(),
+                    'std': col_data.std(),
+                    'min': col_data.min(),
+                    'max': col_data.max(),
+                    'skewness': col_data.skew(),
+                    'kurtosis': col_data.kurtosis(),
+                    'quartiles': {
+                        'q1': col_data.quantile(0.25),
+                        'q2': col_data.quantile(0.5),
+                        'q3': col_data.quantile(0.75)
+                    }
+                })
             else:
-                fig = px.scatter(df, x=x_col, y=y_col,
-                                 title=f"{y_col} vs {x_col}")
+                col_stats.update({
+                    'top_categories': col_data.value_counts().head(5).to_dict(),
+                    'most_frequent': col_data.mode().iloc[0] if not col_data.mode().empty else None
+                })
 
-            return self._format_chart_response(fig, "scatter", f"scatter_{x_col}_{y_col}")
-        except Exception as e:
-            logger.error(f"Error creating scatter plot: {str(e)}")
-            return None
+            summary['column_stats'][column] = col_stats
 
-    async def _create_box_plot(self, df: pd.DataFrame, column: str, **kwargs) -> Dict[str, Any]:
-        """Create box plot"""
-        if column not in df.columns or not pd.api.types.is_numeric_dtype(df[column]):
-            return None
+        return summary
 
-        try:
-            fig = px.box(df, y=column, title=f"Box Plot of {column}")
-            return self._format_chart_response(fig, "box", f"box_{column}")
-        except Exception as e:
-            logger.error(f"Error creating box plot: {str(e)}")
-            return None
+    async def _analyze_correlations(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze correlations between numeric variables"""
+        numeric_df = df.select_dtypes(include=[np.number])
 
-    def _format_chart_response(self, fig, chart_type: str, chart_id: str) -> Dict[str, Any]:
-        """Format chart response with base64 encoding"""
-        try:
-            # Convert to base64 for easy transmission
-            img_bytes = fig.to_image(format="png", width=800, height=500)
-            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+        if numeric_df.empty:
+            return {'message': 'No numeric columns for correlation analysis'}
 
-            # Get chart data as JSON for frontend rendering
-            chart_json = fig.to_json()
+        correlation_matrix = numeric_df.corr()
 
-            return {
-                'chart_id': chart_id,
-                'chart_type': chart_type,
-                'title': fig.layout.title.text if fig.layout.title else chart_id,
-                'image_base64': img_base64,
-                'chart_json': chart_json,
-                'config': {
-                    'responsive': True,
-                    'displayModeBar': True
+        # Find strong correlations
+        strong_correlations = []
+        for i in range(len(correlation_matrix.columns)):
+            for j in range(i + 1, len(correlation_matrix.columns)):
+                corr_value = correlation_matrix.iloc[i, j]
+                if abs(corr_value) > 0.5:  # Threshold for strong correlation
+                    strong_correlations.append({
+                        'variable1': correlation_matrix.columns[i],
+                        'variable2': correlation_matrix.columns[j],
+                        'correlation': corr_value,
+                        'strength': 'strong' if abs(corr_value) > 0.7 else 'moderate'
+                    })
+
+        return {
+            'correlation_matrix': correlation_matrix.to_dict(),
+            'strong_correlations': strong_correlations,
+            'heatmap_data': self._prepare_heatmap_data(correlation_matrix)
+        }
+
+    async def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Detect outliers in numeric columns"""
+        numeric_df = df.select_dtypes(include=[np.number])
+        outliers_report = {}
+
+        for column in numeric_df.columns:
+            col_data = numeric_df[column].dropna()
+
+            # IQR method
+            Q1 = col_data.quantile(0.25)
+            Q3 = col_data.quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+
+            outliers = col_data[(col_data < lower_bound) | (col_data > upper_bound)]
+
+            # Z-score method
+            z_scores = np.abs(stats.zscore(col_data))
+            z_outliers = col_data[z_scores > 3]
+
+            outliers_report[column] = {
+                'iqr_method': {
+                    'outliers_count': len(outliers),
+                    'outliers_percentage': (len(outliers) / len(col_data)) * 100,
+                    'lower_bound': lower_bound,
+                    'upper_bound': upper_bound
+                },
+                'zscore_method': {
+                    'outliers_count': len(z_outliers),
+                    'outliers_percentage': (len(z_outliers) / len(col_data)) * 100
                 }
             }
-        except Exception as e:
-            logger.error(f"Error formatting chart response: {str(e)}")
-            return None
 
-    def extract_insights_from_charts(self, charts: List[Dict[str, Any]], df: pd.DataFrame) -> List[str]:
-        """Extract basic insights from generated charts"""
-        insights = []
+        return outliers_report
 
-        for chart in charts:
-            chart_type = chart.get('chart_type')
+    async def _analyze_distributions(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze distributions of numeric variables"""
+        numeric_df = df.select_dtypes(include=[np.number])
+        distributions = {}
 
-            if chart_type == 'distribution':
-                insights.append("Check distributions for normality and outliers")
-            elif chart_type == 'correlation':
-                insights.append("Review strong correlations for potential relationships")
-            elif chart_type == 'timeseries':
-                insights.append("Look for trends and seasonal patterns over time")
-            elif chart_type == 'categorical':
-                insights.append("Identify dominant categories and their frequencies")
+        for column in numeric_df.columns:
+            col_data = numeric_df[column].dropna()
 
-        # Add general insights
-        if len(df.select_dtypes(include=[np.number]).columns) >= 3:
-            insights.append("Multiple numeric variables available for multivariate analysis")
-
-        if len(df.select_dtypes(include=['object']).columns) >= 2:
-            insights.append("Categorical variables can be used for segmentation analysis")
-
-        return insights[:5]  # Return top 5 insights
-
-    def get_available_chart_types(self) -> Dict[str, Any]:
-        """Get available chart types and their requirements"""
-        return {
-            'distribution': {
-                'description': 'Histogram showing value distribution',
-                'requirements': ['One numeric column'],
-                'best_for': ['Understanding data spread', 'Identifying outliers']
-            },
-            'correlation': {
-                'description': 'Heatmap showing correlations between numeric columns',
-                'requirements': ['At least 2 numeric columns'],
-                'best_for': ['Finding relationships', 'Feature selection']
-            },
-            'timeseries': {
-                'description': 'Line chart showing trends over time',
-                'requirements': ['One datetime column', 'One numeric column'],
-                'best_for': ['Trend analysis', 'Seasonality detection']
-            },
-            'categorical': {
-                'description': 'Bar chart showing category frequencies',
-                'requirements': ['One categorical column'],
-                'best_for': ['Category comparison', 'Dominant category identification']
-            },
-            'scatter': {
-                'description': 'Scatter plot showing relationship between two variables',
-                'requirements': ['Two numeric columns'],
-                'best_for': ['Correlation visualization', 'Cluster identification']
-            },
-            'box': {
-                'description': 'Box plot showing distribution statistics',
-                'requirements': ['One numeric column'],
-                'best_for': ['Outlier detection', 'Distribution comparison']
+            distributions[column] = {
+                'histogram_data': self._prepare_histogram_data(col_data),
+                'is_normal': stats.normaltest(col_data).pvalue > 0.05,
+                'skewness': col_data.skew(),
+                'kurtosis': col_data.kurtosis()
             }
-        }
 
-    def get_chart_selection_criteria(self) -> Dict[str, Any]:
-        """Get criteria for automatic chart selection"""
+        return distributions
+
+    async def _analyze_trends(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze trends in time series data"""
+        # Identify potential datetime columns
+        datetime_columns = []
+        for column in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[column]):
+                datetime_columns.append(column)
+            else:
+                # Try to convert to datetime
+                try:
+                    pd.to_datetime(df[column])
+                    datetime_columns.append(column)
+                except:
+                    continue
+
+        trends = {}
+        for date_col in datetime_columns[:1]:  # Analyze first datetime column
+            try:
+                df_sorted = df.sort_values(date_col)
+                numeric_cols = df_sorted.select_dtypes(include=[np.number]).columns
+
+                for num_col in numeric_cols[:3]:  # Analyze first 3 numeric columns
+                    trend_data = df_sorted[[date_col, num_col]].dropna()
+                    if len(trend_data) > 1:
+                        # Calculate trend
+                        x = np.arange(len(trend_data))
+                        y = trend_data[num_col].values
+                        slope, intercept = np.polyfit(x, y, 1)
+
+                        trends[f'{num_col}_over_{date_col}'] = {
+                            'slope': slope,
+                            'trend_direction': 'increasing' if slope > 0 else 'decreasing',
+                            'trend_strength': abs(slope),
+                            'data_points': len(trend_data)
+                        }
+            except:
+                continue
+
+        return trends
+
+    def _prepare_heatmap_data(self, correlation_matrix: pd.DataFrame) -> List[Dict]:
+        """Prepare correlation matrix data for heatmap visualization"""
+        heatmap_data = []
+        columns = correlation_matrix.columns
+
+        for i, col1 in enumerate(columns):
+            for j, col2 in enumerate(columns):
+                heatmap_data.append({
+                    'x': col1,
+                    'y': col2,
+                    'value': correlation_matrix.iloc[i, j]
+                })
+
+        return heatmap_data
+
+    def _prepare_histogram_data(self, data: pd.Series, bins: int = 20) -> Dict:
+        """Prepare histogram data for visualization"""
+        counts, bin_edges = np.histogram(data.dropna(), bins=bins)
+
         return {
-            'numeric_columns': ['distribution', 'box', 'correlation', 'scatter'],
-            'categorical_columns': ['categorical'],
-            'datetime_columns': ['timeseries'],
-            'mixed_columns': ['scatter with color encoding']
+            'counts': counts.tolist(),
+            'bin_edges': bin_edges.tolist(),
+            'bin_centers': ((bin_edges[:-1] + bin_edges[1:]) / 2).tolist()
         }

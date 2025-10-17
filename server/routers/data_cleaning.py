@@ -1,61 +1,92 @@
-from fastapi import APIRouter, HTTPException
-from server.models.dataset_schema import DataCleaningRequest, DataCleaningResponse
-from server.services.data_cleaner import DataCleaner
-from server.services.data_loader import DataLoader
-from server.utils.logger import setup_logger
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+
+from services.data_cleaner import DataCleaner
+from services.file_manager import FileManager
+from config import get_settings, Settings
 
 router = APIRouter()
-logger = setup_logger()
-data_cleaner = DataCleaner()
-data_loader = DataLoader()
 
 
-@router.post("/clean", response_model=DataCleaningResponse)
-async def clean_dataset(request: DataCleaningRequest):
+class CleaningOptions(BaseModel):
+    file_id: str
+    remove_duplicates: bool = True
+    handle_missing_values: str = "auto"  # auto, drop, fill_mean, fill_median, fill_mode
+    fix_data_types: bool = True
+    remove_outliers: bool = False
+    outlier_method: str = "iqr"  # iqr, zscore
+
+
+class CleaningResponse(BaseModel):
+    success: bool
+    message: str
+    cleaned_file_id: str
+    cleaning_report: Dict[str, Any]
+
+
+@router.post("/clean", response_model=CleaningResponse)
+async def clean_data(
+        options: CleaningOptions,
+        settings: Settings = Depends(get_settings)
+):
     """
-    Perform data cleaning operations on a dataset
+    Clean and preprocess dataset
     """
     try:
-        # Load dataset
-        df = data_loader.load_dataset_by_id(request.dataset_id)
-        if df is None:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+        file_manager = FileManager(settings)
+        data_cleaner = DataCleaner()
 
-        rows_before = len(df)
+        # Load original data
+        file_path = file_manager.get_file_path(options.file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
 
-        # Perform cleaning operations
-        cleaned_df, operations_performed, cleaning_report = await data_cleaner.clean_dataframe(
-            df, request.operations, request.options or {}
+        # Perform cleaning
+        cleaning_result = await data_cleaner.clean_dataset(
+            file_path,
+            options.dict()
         )
 
-        # Save cleaned dataset
-        cleaned_dataset_id = f"cleaned_{request.dataset_id}"
-        data_loader.store_dataset(cleaned_df, cleaned_dataset_id, "cleaned_dataset")
+        # Save cleaned data
+        cleaned_file_id = file_manager.generate_file_id()
+        cleaned_file_path = file_manager.get_processed_path(cleaned_file_id)
 
-        rows_after = len(cleaned_df)
+        cleaning_result['cleaned_data'].to_csv(cleaned_file_path, index=False)
 
-        logger.info(f"Data cleaning completed for dataset: {request.dataset_id}")
-
-        return DataCleaningResponse(
-            dataset_id=request.dataset_id,
-            cleaned_dataset_id=cleaned_dataset_id,
-            operations_performed=operations_performed,
-            rows_before=rows_before,
-            rows_after=rows_after,
-            cleaning_report=cleaning_report
+        return CleaningResponse(
+            success=True,
+            message="Data cleaning completed successfully",
+            cleaned_file_id=cleaned_file_id,
+            cleaning_report=cleaning_result['report']
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error cleaning dataset: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Data cleaning failed: {str(e)}")
 
 
-@router.get("/cleaning-options")
-async def get_cleaning_options():
-    """Get available data cleaning operations"""
-    return {
-        "available_operations": data_cleaner.get_available_operations(),
-        "default_options": data_cleaner.get_default_options()
-    }
+@router.get("/cleaning-report/{file_id}")
+async def get_cleaning_report(
+        file_id: str,
+        settings: Settings = Depends(get_settings)
+):
+    """
+    Get data quality report before cleaning
+    """
+    try:
+        file_manager = FileManager(settings)
+        data_cleaner = DataCleaner()
+
+        file_path = file_manager.get_file_path(file_id)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+
+        quality_report = await data_cleaner.get_data_quality_report(file_path)
+
+        return {
+            "file_id": file_id,
+            "quality_report": quality_report
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
