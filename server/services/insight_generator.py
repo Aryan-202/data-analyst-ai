@@ -2,9 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
 import asyncio
-import json
 import requests
-import os
 from config import Settings
 
 
@@ -15,15 +13,15 @@ class InsightGenerator:
         self.ai_provider = "none"
         self.model_name = "gemma:2b"  # Faster model
 
-        print("🔍 Testing AI providers...")
+        print("Testing AI providers...")
 
         # Test available AI providers
         if self._test_ollama():
             self.ai_enabled = True
             self.ai_provider = "ollama"
-            print(f"✅ Ollama AI enabled - using {self.model_name}")
+            print(f"Ollama AI enabled - using {self.model_name}")
         else:
-            print("ℹ️  No AI service available - using basic analytics only")
+            print("No AI service available - using basic analytics only")
 
     def _test_ollama(self) -> bool:
         """Test if Ollama is running locally"""
@@ -44,10 +42,10 @@ class InsightGenerator:
             print(f"Ollama response status: {test_response.status_code}")
 
             if test_response.status_code == 200:
-                print("✅ Ollama connection successful!")
+                print("Ollama connection successful!")
                 return True
             else:
-                print(f"❌ Ollama returned status: {test_response.status_code}")
+                print(f"Ollama returned status: {test_response.status_code}")
                 return False
 
         except Exception as e:
@@ -91,9 +89,9 @@ class InsightGenerator:
                 ai_summary = await self._generate_ai_summary(insights, df, focus_areas)
                 insights['ai_summary'] = ai_summary
                 insights['recommendations'] = ai_summary.get('recommendations', [])
-                print("✅ AI insights generated successfully")
+                print("AI insights generated successfully")
             except Exception as e:
-                print(f"❌ AI insight generation failed: {e}")
+                print(f"AI insight generation failed: {e}")
                 insights['ai_summary'] = {
                     'summary': f'AI insights temporarily unavailable: {str(e)}',
                     'recommendations': self._generate_basic_recommendations(insights)
@@ -167,7 +165,7 @@ Be concise and data-driven. Reference specific numbers."""
             }
 
         except Exception as e:
-            print(f"❌ Error answering question: {e}")
+            print(f"Error answering question: {e}")
             return {
                 'answer': f"Error generating response: {str(e)}",
                 'supporting_data': None,
@@ -195,7 +193,7 @@ Be concise and data-driven. Reference specific numbers."""
 
             # Truncate very long prompts for faster processing
             if len(prompt) > 2000:
-                print("⚠️ Prompt too long, truncating...")
+                print("Prompt too long, truncating...")
                 prompt = prompt[:2000] + "... [truncated]"
 
             # Retry logic
@@ -224,11 +222,11 @@ Be concise and data-driven. Reference specific numbers."""
                     if response.status_code == 200:
                         result = response.json()
                         response_text = result.get('response', 'No response from AI')
-                        print(f"✅ Ollama response received: {len(response_text)} characters")
+                        print(f"Ollama response received: {len(response_text)} characters")
                         return response_text
                     else:
                         error_msg = f"Ollama API error: {response.status_code} - {response.text}"
-                        print(f"❌ {error_msg}")
+                        print(f"{error_msg}")
                         if attempt < max_retries - 1:
                             print(f"🔄 Retrying... ({attempt + 1}/{max_retries})")
                             continue
@@ -236,14 +234,14 @@ Be concise and data-driven. Reference specific numbers."""
 
                 except requests.exceptions.Timeout:
                     if attempt < max_retries - 1:
-                        print(f"⏰ Timeout, retrying... ({attempt + 1}/{max_retries})")
+                        print(f"Timeout, retrying... ({attempt + 1}/{max_retries})")
                         continue
                     else:
-                        print("❌ Ollama request timed out after retries")
+                        print("Ollama request timed out after retries")
                         return "AI response timed out. Please try a simpler question or smaller dataset."
 
         except Exception as e:
-            print(f"❌ Ollama call failed: {e}")
+            print(f"Ollama call failed: {e}")
             return f"AI service temporarily unavailable: {str(e)}"
 
     async def _generate_ai_summary(self, insights: Dict[str, Any],
@@ -252,7 +250,7 @@ Be concise and data-driven. Reference specific numbers."""
         prompt = self._build_insight_prompt(insights, df, focus_areas)
 
         try:
-            print("🤖 Generating AI summary...")
+            print("Generating AI summary...")
             content = await self._call_ollama([
                 {"role": "system",
                  "content": "You are a data analyst. Provide concise insights and 2-3 recommendations based on the data."},
@@ -277,7 +275,7 @@ Be concise and data-driven. Reference specific numbers."""
             }
 
         except Exception as e:
-            print(f"❌ AI summary generation failed: {e}")
+            print(f"AI summary generation failed: {e}")
             return {
                 'summary': f'AI summary failed: {str(e)}',
                 'recommendations': self._generate_basic_recommendations(insights)
