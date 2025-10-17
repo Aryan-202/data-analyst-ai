@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
-from server.models.dataset_schema import VisualizationRequest, VisualizationResponse
-from server.services.visualization_engine import VisualizationEngine
-from server.services.data_loader import DataLoader
-from server.utils.logger import setup_logger
+from models.dataset_schema import VisualizationRequest, VisualizationResponse
+from services.visualization_engine import VisualizationEngine
+from services.data_loader import DataLoader
+from utils.logger import setup_logger
 
 router = APIRouter()
 logger = setup_logger()
