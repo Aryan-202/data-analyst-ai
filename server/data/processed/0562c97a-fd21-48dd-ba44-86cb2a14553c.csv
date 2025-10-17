@@ -1,0 +1,9 @@
+date,product,category,sales,revenue,customers
+2023-01-01,Product A,Electronics,150,7500.5,120
+2023-01-02,Product B,Home,200,12000.75,180
+2023-01-03,Product A,Electronics,180,9000.25,150
+2023-01-04,Product C,Books,300,4500.0,280
+2023-01-05,Product B,Home,220,13200.5,200
+2023-01-06,Product A,Electronics,190,9500.0,160
+2023-01-07,Product C,Books,250,3750.0,220
+2023-01-08,Product B,Home,210,12600.0,190
