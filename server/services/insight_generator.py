@@ -14,6 +14,8 @@ class InsightGenerator:
         self.ai_enabled = False
         self.ai_provider = "none"
 
+        print("🔍 Testing AI providers...")
+
         # Test available AI providers
         if self._test_ollama():
             self.ai_enabled = True
@@ -32,7 +34,7 @@ class InsightGenerator:
             response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "llama2",
+                    "model": "llama2:7b",
                     "prompt": "Say 'Hello'",
                     "stream": False
                 },
@@ -196,7 +198,7 @@ Guidelines:
             lambda: requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "llama2:7b",  # Change to your preferred model
+                    "model": "llama2:7b",
                     "prompt": prompt,
                     "stream": False,
                     "options": {
@@ -346,7 +348,6 @@ Guidelines:
 
         return recommendations[:5]
 
-    # ... (keep all the other existing methods the same)
     async def _generate_dataset_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Generate basic dataset summary"""
         return {

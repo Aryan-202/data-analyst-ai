@@ -49,57 +49,77 @@ class VisualizationEngine:
         for col in numeric_cols[:2]:  # First 2 numeric columns
             if len(charts) >= max_charts:
                 break
-            chart = await self._create_histogram(df, col)
-            charts.append({
-                'type': 'histogram',
-                'title': f'Distribution of {col}',
-                'data': chart
-            })
+            try:
+                chart = await self._create_histogram(df, col)
+                charts.append({
+                    'type': 'histogram',
+                    'title': f'Distribution of {col}',
+                    'data': chart
+                })
+            except Exception as e:
+                print(f"Error creating histogram for {col}: {e}")
+                continue
 
         # 2. Correlation heatmap if multiple numeric columns
         if len(numeric_cols) > 1 and len(charts) < max_charts:
-            chart = await self._create_heatmap(df)
-            charts.append({
-                'type': 'heatmap',
-                'title': 'Correlation Matrix',
-                'data': chart
-            })
+            try:
+                chart = await self._create_heatmap(df)
+                charts.append({
+                    'type': 'heatmap',
+                    'title': 'Correlation Matrix',
+                    'data': chart
+                })
+            except Exception as e:
+                print(f"Error creating heatmap: {e}")
 
         # 3. Scatter plot for strongest correlation
         if len(numeric_cols) >= 2 and len(charts) < max_charts:
-            corr_matrix = df[numeric_cols].corr()
-            strong_corr = self._find_strongest_correlation(corr_matrix)
-            if strong_corr:
-                chart = await self._create_scatter_plot(df, strong_corr[0], strong_corr[1])
-                charts.append({
-                    'type': 'scatter',
-                    'title': f'{strong_corr[0]} vs {strong_corr[1]}',
-                    'data': chart
-                })
+            try:
+                corr_matrix = df[numeric_cols].corr()
+                strong_corr = self._find_strongest_correlation(corr_matrix)
+                if strong_corr:
+                    chart = await self._create_scatter_plot(df, strong_corr[0], strong_corr[1])
+                    charts.append({
+                        'type': 'scatter',
+                        'title': f'{strong_corr[0]} vs {strong_corr[1]}',
+                        'data': chart
+                    })
+            except Exception as e:
+                print(f"Error creating scatter plot: {e}")
 
         # 4. Bar charts for categorical variables
         for col in categorical_cols[:2]:
             if len(charts) >= max_charts:
                 break
-            if df[col].nunique() <= 20:  # Avoid high cardinality
-                chart = await self._create_bar_chart(df, col)
-                charts.append({
-                    'type': 'bar',
-                    'title': f'Distribution of {col}',
-                    'data': chart
-                })
+            try:
+                if df[col].nunique() <= 20:  # Avoid high cardinality
+                    chart = await self._create_bar_chart(df, col)
+                    charts.append({
+                        'type': 'bar',
+                        'title': f'Distribution of {col}',
+                        'data': chart
+                    })
+            except Exception as e:
+                print(f"Error creating bar chart for {col}: {e}")
+                continue
 
         # 5. Box plots for numeric by categorical
         if categorical_cols and numeric_cols and len(charts) < max_charts:
-            cat_col = categorical_cols[0]
-            num_col = numeric_cols[0]
-            if df[cat_col].nunique() <= 10:
-                chart = await self._create_box_plot(df, cat_col, num_col)
-                charts.append({
-                    'type': 'box',
-                    'title': f'{num_col} by {cat_col}',
-                    'data': chart
-                })
+            try:
+                cat_col = categorical_cols[0]
+                num_col = numeric_cols[0]
+                if df[cat_col].nunique() <= 10:
+                    chart = await self._create_box_plot(df, cat_col, num_col)
+                    charts.append({
+                        'type': 'box',
+                        'title': f'{num_col} by {cat_col}',
+                        'data': chart
+                    })
+            except Exception as e:
+                print(f"Error creating box plot: {e}")
+
+        # FIX: Convert numpy types to native Python types
+        charts = self._convert_numpy_types(charts)
 
         return charts
 
@@ -141,6 +161,9 @@ class VisualizationEngine:
                     'reason': f'Show frequency distribution of {col}',
                     'suitable': True
                 })
+
+        # FIX: Convert numpy types to native Python types
+        suggestions = self._convert_numpy_types(suggestions)
 
         return suggestions[:10]  # Return top 10 suggestions
 
@@ -192,8 +215,8 @@ class VisualizationEngine:
 
         fig = go.Figure(data=go.Heatmap(
             z=corr_matrix.values,
-            x=corr_matrix.columns,
-            y=corr_matrix.columns,
+            x=corr_matrix.columns.tolist(),  # Convert to list
+            y=corr_matrix.columns.tolist(),  # Convert to list
             colorscale='RdBu',
             zmid=0
         ))
@@ -259,3 +282,22 @@ class VisualizationEngine:
                     strong_corr = (corr_matrix.columns[i], corr_matrix.columns[j])
 
         return strong_corr
+
+    def _convert_numpy_types(self, obj: Any) -> Any:
+        """Recursively convert numpy types to native Python types for JSON serialization"""
+        if isinstance(obj, dict):
+            return {key: self._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif pd.isna(obj):
+            return None
+        else:
+            return obj
