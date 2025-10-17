@@ -1,46 +1,30 @@
 
 # 📊 Data Analyst AI - Automated Data Analysis Platform
 
-[https://img.shields.io/badge/Python-3.8%252B-blue](https://img.shields.io/badge/Python-3.8%252B-blue)  
-[https://img.shields.io/badge/FastAPI-0.104.1-green](https://img.shields.io/badge/FastAPI-0.104.1-green)  
-[https://img.shields.io/badge/React-18.0%252B-blue](https://img.shields.io/badge/React-18.0%252B-blue)  
-[https://img.shields.io/badge/License-MIT-yellow](https://img.shields.io/badge/License-MIT-yellow)
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-**Data Analyst AI** is an intelligent, AI-powered platform that automates 80-90% of a data analyst's workflow. From data cleaning to insight generation and predictive modeling, this system provides comprehensive data analysis capabilities through an intuitive interface.
+**Data Analyst AI** is an intelligent, AI-powered platform that automates 80-90% of a data analyst's workflow. From data cleaning to insight generation and predictive modeling, this system provides comprehensive data analysis capabilities through a powerful API.
 
 ## 🚀 Features
 
 ### Core Capabilities
-
-- **📁 Smart Data Ingestion** - Support for CSV, Excel, JSON files
-    
-- **🧹 Automated Data Cleaning** - Handle missing values, outliers, duplicates
-    
-- **📊 Exploratory Data Analysis (EDA)** - Automatic statistical analysis and correlation detection
-    
-- **🤖 AI-Powered Insights** - GPT-4 powered natural language insights and recommendations
-    
-- **📈 Automatic Visualization** - Smart chart generation based on data types
-    
-- **🔮 Predictive Modeling** - AutoML for classification, regression, and clustering
-    
-- **💬 Chat with Your Data** - Natural language queries about your datasets
-    
-- **📑 Report Generation** - Export analysis to PDF, Excel, PowerPoint
-    
+- **📁 Smart Data Ingestion** - Support for CSV, Excel, JSON files
+- **🧹 Automated Data Cleaning** - Handle missing values, outliers, duplicates
+- **📊 Exploratory Data Analysis (EDA)** - Automatic statistical analysis and correlation detection
+- **🤖 AI-Powered Insights** - GPT-4 powered natural language insights and recommendations
+- **📈 Automatic Visualization** - Smart chart generation based on data types
+- **🔮 Predictive Modeling** - AutoML for classification, regression, and clustering
+- **💬 Chat with Your Data** - Natural language queries about your datasets
+- **📑 Report Generation** - Export analysis to PDF, Excel, PowerPoint
 
 ### Advanced Features
-
 - **Real-time Data Processing**
-    
-- **Interactive Dashboards**
-    
-- **Multi-format Export**
-    
 - **RESTful API**
-    
 - **Scalable Architecture**
-
+- **File Persistence**
+- **Model Storage**
 
 ## 🏗️ System Architecture
 
@@ -51,42 +35,64 @@ Frontend (React/Streamlit) ←→ FastAPI Backend ←→ AI Engine
                                Data Processing    Insight Generation
 ```
 
+
 ## 🛠️ Tech Stack
 
 ### Backend
-
 - **Framework**: FastAPI (Python)
-    
 - **Data Processing**: Pandas, NumPy
-    
-- **Machine Learning**: Scikit-learn, PyCaret
-    
-- **AI/LLM**: OpenAI GPT-4, LangChain
-    
-- **Visualization**: Plotly, Matplotlib, Seaborn
-    
-- **File Processing**: Python-pptx, ReportLab, OpenPyXL
-    
-
-### Frontend
-
-- **Primary**: React.js with TailwindCSS
-    
-- **Alternative**: Streamlit (for rapid prototyping)
-    
-- **Charts**: Plotly.js, Chart.js
-    
+- **Machine Learning**: Scikit-learn
+- **AI/LLM**: OpenAI GPT-4
+- **Visualization**: Plotly, Matplotlib
+- **File Processing**: ReportLab
 
 ### Infrastructure
+- **Database**: SQLite (with PostgreSQL support)
+- **File Storage**: Local File System
+- **Authentication**: JWT Tokens (ready for implementation)
 
-- **Database**: PostgreSQL / SQLite
-    
-- **File Storage**: Local File System (extensible to AWS S3)
-    
-- **Authentication**: JWT Tokens
-    
-- **Deployment**: Docker, AWS/GCP
-    
+## 📁 Current Project Structure
+```
+data-analyst-ai/  
+├── .gitignore  
+├── [README.md](https://readme.md/)  
+├── requirements.txt  
+└── server/  
+├── .gitignore  
+├── config.py  
+├── data/  
+│ ├── models/ # Trained ML models (.pkl files)  
+│ ├── processed/ # Cleaned datasets  
+│ ├── raw/ # Original uploaded files  
+│ └── reports/ # Generated reports  
+├── database/  
+│ ├── db_connection.py  
+│ └── user_table.py  
+├── main.py # FastAPI application entry point  
+├── models/  
+│ └── dataset_schema.py # Pydantic schemas  
+├── routers/ # API endpoints  
+│ ├── data_cleaning.py  
+│ ├── data_upload.py  
+│ ├── eda.py  
+│ ├── insights.py  
+│ ├── modeling.py  
+│ ├── reports.py  
+│ └── visualization.py  
+├── services/ # Business logic  
+│ ├── data_cleaner.py  
+│ ├── data_loader.py  
+│ ├── eda_engine.py  
+│ ├── file_manager.py  
+│ ├── insight_generator.py  
+│ ├── model_trainer.py  
+│ ├── report_generator.py  
+│ └── visualization_engine.py  
+└── utils/ # Helper functions  
+├── file_utils.py  
+├── logger.py  
+└── time_utils.py
+```
 
 ## 📁 Project Structure
 
@@ -214,13 +220,9 @@ data-analyst-ai/
 ## 🚀 Quick Start
 
 ### Prerequisites
-
 - Python 3.8+
-    
-- Node.js 16+ (for React frontend)
-    
 - OpenAI API key (for AI features)
-    
+
 
 ### Installation
 
@@ -240,15 +242,20 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # Set environment variables
-cp .env.example .env
-# Edit .env with your OpenAI API key and other settings
+echo "OPENAI_API_KEY=your-openai-api-key-here" > .env
+echo "DEBUG=True" >> .env
+echo "SECRET_KEY=your-secret-key-here" >> .env
 ```
 
 3. **Frontend Setup (React)**
 ```
-cd client/react_app
-npm install
-npm start
+npm run dev
+```
+
+3. **Run the Application**
+```
+cd server
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 4. **Run the Application**
