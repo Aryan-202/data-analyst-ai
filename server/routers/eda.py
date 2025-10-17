@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List
+import os
 
 from services.eda_engine import EDAEngine
 from services.file_manager import FileManager

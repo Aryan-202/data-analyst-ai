@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import json
+import os
 
 from services.visualization_engine import VisualizationEngine
 from services.file_manager import FileManager

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+import os
 
 from services.insight_generator import InsightGenerator
 from services.file_manager import FileManager
