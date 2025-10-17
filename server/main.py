@@ -18,7 +18,7 @@ from routers import (
 from utils.logger import setup_logger
 
 # Add this after the imports in main.py
-print("🚀 Starting server with AI detection...")
+print("Starting server with AI detection...")
 
 # Test the insight generator directly
 try:
@@ -30,7 +30,7 @@ try:
     print(f"AI Provider Status: {insight_gen.ai_provider}")
     print(f"AI Enabled: {insight_gen.ai_enabled}")
 except Exception as e:
-    print(f"❌ Error creating InsightGenerator: {e}")
+    print(f"Error creating InsightGenerator: {e}")
 
 # Load environment variables
 load_dotenv()
