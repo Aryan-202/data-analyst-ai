@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -27,8 +27,8 @@ try:
 
     settings = get_settings()
     insight_gen = InsightGenerator(settings)
-    print(f"🤖 AI Provider Status: {insight_gen.ai_provider}")
-    print(f"🤖 AI Enabled: {insight_gen.ai_enabled}")
+    print(f"AI Provider Status: {insight_gen.ai_provider}")
+    print(f"AI Enabled: {insight_gen.ai_enabled}")
 except Exception as e:
     print(f"❌ Error creating InsightGenerator: {e}")
 
