@@ -21,40 +21,37 @@ class InsightGenerator:
             self.ai_enabled = True
             self.ai_provider = "ollama"
             print("✅ Ollama AI enabled - using local AI models")
-        elif self._test_huggingface():
-            self.ai_enabled = True
-            self.ai_provider = "huggingface"
-            print("✅ Hugging Face AI enabled - using free inference API")
         else:
             print("ℹ️  No AI service available - using basic analytics only")
 
     def _test_ollama(self) -> bool:
         """Test if Ollama is running locally"""
         try:
-            response = requests.post(
+            print("🧪 Testing Ollama connection...")
+
+            # Test with a simple request
+            test_response = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
                     "model": "llama2:7b",
-                    "prompt": "Say 'Hello'",
+                    "prompt": "Say 'Hello' in one word",
                     "stream": False
                 },
-                timeout=10
+                timeout=15
             )
-            return response.status_code == 200
-        except Exception as e:
-            print(f"Ollama test failed: {e}")
-            return False
 
-    def _test_huggingface(self) -> bool:
-        """Test if Hugging Face is available"""
-        try:
-            # Test with a simple model
-            response = requests.get(
-                "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
-                timeout=10
-            )
-            return response.status_code == 200
-        except:
+            print(f"Ollama response status: {test_response.status_code}")
+
+            if test_response.status_code == 200:
+                print("✅ Ollama connection successful!")
+                return True
+            else:
+                print(f"❌ Ollama returned status: {test_response.status_code}")
+                print(f"Response: {test_response.text}")
+                return False
+
+        except Exception as e:
+            print(f"❌ Ollama test failed: {e}")
             return False
 
     async def generate_comprehensive_insights(self, file_path: str,
@@ -89,17 +86,20 @@ class InsightGenerator:
         # Generate AI summary if available
         if self.ai_enabled:
             try:
+                print("🤖 Generating AI-powered insights...")
                 ai_summary = await self._generate_ai_summary(insights, df, focus_areas)
                 insights['ai_summary'] = ai_summary
                 insights['recommendations'] = ai_summary.get('recommendations', [])
+                print("✅ AI insights generated successfully")
             except Exception as e:
+                print(f"❌ AI insight generation failed: {e}")
                 insights['ai_summary'] = {
                     'summary': f'AI insights temporarily unavailable: {str(e)}',
                     'recommendations': self._generate_basic_recommendations(insights)
                 }
         else:
             insights['ai_summary'] = {
-                'summary': 'Free AI service not available. Using advanced analytics only.',
+                'summary': 'AI service not available. Using advanced analytics only.',
                 'recommendations': self._generate_basic_recommendations(insights)
             }
 
@@ -153,16 +153,16 @@ Guidelines:
         messages.append({"role": "user", "content": question})
 
         try:
-            if self.ai_provider == "ollama":
-                answer = await self._call_ollama(messages)
-            else:
-                answer = await self._call_huggingface(question)
+            print(f"🤖 Processing question: {question}")
+            answer = await self._call_ollama(messages)
 
             # Extract supporting data if mentioned
             supporting_data = await self._extract_supporting_data(df, question, answer)
 
             # Generate follow-up questions
             suggested_followups = await self._generate_followup_questions(question, df)
+
+            print("✅ Question answered successfully")
 
             return {
                 'answer': answer,
@@ -172,6 +172,7 @@ Guidelines:
             }
 
         except Exception as e:
+            print(f"❌ Error answering question: {e}")
             return {
                 'answer': f"Error generating response: {str(e)}",
                 'supporting_data': None,
@@ -181,74 +182,65 @@ Guidelines:
 
     async def _call_ollama(self, messages: List[Dict]) -> str:
         """Call Ollama local API"""
-        # Convert messages to prompt format for Ollama
-        prompt = ""
-        for msg in messages:
-            if msg["role"] == "system":
-                prompt += f"System: {msg['content']}\n\n"
-            elif msg["role"] == "user":
-                prompt += f"User: {msg['content']}\n\n"
-            elif msg["role"] == "assistant":
-                prompt += f"Assistant: {msg['content']}\n\n"
-
-        prompt += "Assistant: "
-
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "llama2:7b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 500
-                    }
-                },
-                timeout=30
-            )
-        )
-
-        if response.status_code == 200:
-            return response.json().get('response', 'No response from AI')
-        else:
-            raise Exception(f"Ollama API error: {response.status_code}")
-
-    async def _call_huggingface(self, prompt: str) -> str:
-        """Call Hugging Face Inference API"""
         try:
+            # Convert messages to prompt format for Ollama
+            prompt = ""
+            for msg in messages:
+                if msg["role"] == "system":
+                    prompt += f"System: {msg['content']}\n\n"
+                elif msg["role"] == "user":
+                    prompt += f"User: {msg['content']}\n\n"
+                elif msg["role"] == "assistant":
+                    prompt += f"Assistant: {msg['content']}\n\n"
+
+            prompt += "Assistant: "
+
+            print("📡 Calling Ollama API...")
+
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: requests.post(
-                    "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium",
-                    json={"inputs": prompt},
-                    timeout=30
+                    "http://localhost:11434/api/generate",
+                    json={
+                        "model": "llama2:7b",
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.3,
+                            "top_p": 0.9,
+                            "num_predict": 800
+                        }
+                    },
+                    timeout=60
                 )
             )
 
             if response.status_code == 200:
                 result = response.json()
-                if isinstance(result, list) and len(result) > 0:
-                    return result[0].get('generated_text', '')
-            return "Hugging Face API unavailable"
+                response_text = result.get('response', 'No response from AI')
+                print(f"✅ Ollama response received: {len(response_text)} characters")
+                return response_text
+            else:
+                error_msg = f"Ollama API error: {response.status_code} - {response.text}"
+                print(f"❌ {error_msg}")
+                raise Exception(error_msg)
+
         except Exception as e:
-            return f"Hugging Face error: {str(e)}"
+            print(f"❌ Ollama call failed: {e}")
+            raise
 
     async def _generate_ai_summary(self, insights: Dict[str, Any],
                                    df: pd.DataFrame, focus_areas: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Generate AI-powered summary using available AI service"""
+        """Generate AI-powered summary using Ollama"""
         prompt = self._build_insight_prompt(insights, df, focus_areas)
 
         try:
-            if self.ai_provider == "ollama":
-                content = await self._call_ollama([
-                    {"role": "system",
-                     "content": "You are a senior data analyst. Provide concise, actionable insights and recommendations."},
-                    {"role": "user", "content": prompt}
-                ])
-            else:
-                content = await self._call_huggingface(prompt)
+            print("🤖 Generating AI summary...")
+            content = await self._call_ollama([
+                {"role": "system",
+                 "content": "You are a senior data analyst. Provide concise, actionable insights and recommendations based on data."},
+                {"role": "user", "content": prompt}
+            ])
 
             # Parse the response
             summary_parts = content.split('Recommendations:')
@@ -268,6 +260,7 @@ Guidelines:
             }
 
         except Exception as e:
+            print(f"❌ AI summary generation failed: {e}")
             return {
                 'summary': f'AI summary failed: {str(e)}',
                 'recommendations': self._generate_basic_recommendations(insights)
