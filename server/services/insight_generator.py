@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
-import openai
+from openai import OpenAI  # Updated import for v1.0+
 from config import Settings
 import asyncio
 import json
@@ -11,7 +11,7 @@ class InsightGenerator:
     def __init__(self, settings: Settings):
         self.settings = settings
         if settings.openai_api_key:
-            openai.api_key = settings.openai_api_key
+            self.client = OpenAI(api_key=settings.openai_api_key)
 
     async def generate_comprehensive_insights(self, file_path: str,
                                               analysis_types: List[str],
@@ -43,9 +43,15 @@ class InsightGenerator:
 
         # Generate AI summary
         if self.settings.openai_api_key:
-            ai_summary = await self._generate_ai_summary(insights, df, focus_areas)
-            insights['ai_summary'] = ai_summary
-            insights['recommendations'] = ai_summary.get('recommendations', [])
+            try:
+                ai_summary = await self._generate_ai_summary(insights, df, focus_areas)
+                insights['ai_summary'] = ai_summary
+                insights['recommendations'] = ai_summary.get('recommendations', [])
+            except Exception as e:
+                insights['ai_summary'] = {
+                    'summary': f"AI insights temporarily unavailable: {str(e)}",
+                    'recommendations': []
+                }
 
         return insights
 
@@ -96,9 +102,10 @@ Guidelines:
         messages.append({"role": "user", "content": question})
 
         try:
+            # Updated OpenAI API call for v1.0+
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: openai.ChatCompletion.create(
+                lambda: self.client.chat.completions.create(
                     model=self.settings.default_llm_model,
                     messages=messages,
                     max_tokens=500,
@@ -127,6 +134,54 @@ Guidelines:
                 'suggested_followups': []
             }
 
+    async def _generate_ai_summary(self, insights: Dict[str, Any],
+                                   df: pd.DataFrame, focus_areas: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Generate AI-powered summary using OpenAI"""
+        if not self.settings.openai_api_key:
+            return {'summary': 'OpenAI API key not configured', 'recommendations': []}
+
+        try:
+            prompt = self._build_insight_prompt(insights, df, focus_areas)
+
+            # Updated OpenAI API call for v1.0+
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model=self.settings.default_llm_model,
+                    messages=[
+                        {"role": "system",
+                         "content": "You are a senior data analyst. Provide concise, actionable insights and recommendations."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=self.settings.max_insight_tokens,
+                    temperature=0.7
+                )
+            )
+
+            content = response.choices[0].message.content
+
+            # Parse the response (assuming format: Summary: ... Recommendations: ...)
+            summary_parts = content.split('Recommendations:')
+            summary = summary_parts[0].replace('Summary:', '').strip()
+            recommendations = []
+
+            if len(summary_parts) > 1:
+                recommendations = [rec.strip() for rec in summary_parts[1].split('\n') if
+                                   rec.strip() and rec.strip().startswith('-')]
+                recommendations = [rec[1:].strip() for rec in recommendations]
+
+            return {
+                'summary': summary,
+                'recommendations': recommendations
+            }
+
+        except Exception as e:
+            return {
+                'summary': f"AI summary generation failed: {str(e)}",
+                'recommendations': []
+            }
+
+    # ... (keep all the other methods the same as before)
     async def _generate_dataset_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Generate basic dataset summary"""
         return {
@@ -163,7 +218,7 @@ Guidelines:
                     'metric': col,
                     'direction': trend_direction,
                     'strength': trend_strength,
-                    'rate_of_change': slope
+                    'rate_of_change': float(slope)
                 })
 
         return trends
@@ -187,7 +242,7 @@ Guidelines:
 
                     significant_correlations.append({
                         'variables': [corr_matrix.columns[i], corr_matrix.columns[j]],
-                        'correlation': corr,
+                        'correlation': float(corr),
                         'significance': significance,
                         'relationship': relationship,
                         'insight': f"{significance} {relationship} relationship between {corr_matrix.columns[i]} and {corr_matrix.columns[j]}"
@@ -228,52 +283,6 @@ Guidelines:
             'critical_anomalies': critical_anomalies,
             'total_anomalies_detected': len(critical_anomalies)
         }
-
-    async def _generate_ai_summary(self, insights: Dict[str, Any],
-                                   df: pd.DataFrame, focus_areas: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Generate AI-powered summary using OpenAI"""
-        if not self.settings.openai_api_key:
-            return {'summary': 'AI summary not available', 'recommendations': []}
-
-        try:
-            prompt = self._build_insight_prompt(insights, df, focus_areas)
-
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: openai.ChatCompletion.create(
-                    model=self.settings.default_llm_model,
-                    messages=[
-                        {"role": "system",
-                         "content": "You are a senior data analyst. Provide concise, actionable insights and recommendations."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=self.settings.max_insight_tokens,
-                    temperature=0.7
-                )
-            )
-
-            content = response.choices[0].message.content
-
-            # Parse the response (assuming format: Summary: ... Recommendations: ...)
-            summary_parts = content.split('Recommendations:')
-            summary = summary_parts[0].replace('Summary:', '').strip()
-            recommendations = []
-
-            if len(summary_parts) > 1:
-                recommendations = [rec.strip() for rec in summary_parts[1].split('\n') if
-                                   rec.strip() and rec.strip().startswith('-')]
-                recommendations = [rec[1:].strip() for rec in recommendations]
-
-            return {
-                'summary': summary,
-                'recommendations': recommendations
-            }
-
-        except Exception as e:
-            return {
-                'summary': f"Error generating AI summary: {str(e)}",
-                'recommendations': []
-            }
 
     def _build_insight_prompt(self, insights: Dict[str, Any], df: pd.DataFrame,
                               focus_areas: Optional[List[str]]) -> str:

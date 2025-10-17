@@ -1,6 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +20,12 @@ class Settings(BaseSettings):
 
     # App Settings
     max_upload_size: int = int(os.getenv("MAX_UPLOAD_SIZE", 100))  # MB
-    allowed_file_types: list = ["csv", "xlsx", "xls", "json"]
+
+    # FIX: Handle allowed_file_types as a list without JSON parsing
+    @property
+    def allowed_file_types(self) -> List[str]:
+        file_types = os.getenv("ALLOWED_FILE_TYPES", "csv,xlsx,xls,json")
+        return [ft.strip() for ft in file_types.split(",")]
 
     # AI Model Settings
     default_llm_model: str = os.getenv("DEFAULT_LLM_MODEL", "gpt-3.5-turbo")
