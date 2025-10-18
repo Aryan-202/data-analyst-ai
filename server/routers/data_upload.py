@@ -5,8 +5,10 @@ import os
 from typing import Optional
 import uuid
 import traceback
+import numpy as np
 
 from config import get_settings, Settings
+from utils.json_utils import dataframe_to_json_safe
 
 router = APIRouter()
 
@@ -112,7 +114,7 @@ async def preview_data(
         settings: Settings = Depends(get_settings)
 ):
     """
-    Preview uploaded dataset
+    Preview uploaded dataset with proper NaN handling
     """
     try:
         print(f"Preview requested for file_id: {file_id}, rows: {rows}")
@@ -142,14 +144,57 @@ async def preview_data(
 
         print(f"Loaded data with shape: {df.shape}")
 
+        # Manual cleaning function for the preview data
+        def clean_preview_data(df_preview):
+            """Clean DataFrame preview data for JSON serialization"""
+            cleaned_records = []
+            for record in df_preview.to_dict('records'):
+                cleaned_record = {}
+                for key, value in record.items():
+                    # Handle NaN and None values
+                    if pd.isna(value) or value is None:
+                        cleaned_record[key] = None
+                    # Handle numpy types
+                    elif isinstance(value, (np.integer, np.int32, np.int64)):
+                        cleaned_record[key] = int(value)
+                    elif isinstance(value, (np.floating, np.float32, np.float64)):
+                        if np.isnan(value) or np.isinf(value):
+                            cleaned_record[key] = None
+                        else:
+                            cleaned_record[key] = float(value)
+                    elif isinstance(value, np.bool_):
+                        cleaned_record[key] = bool(value)
+                    # Handle pandas Timestamp
+                    elif isinstance(value, pd.Timestamp):
+                        cleaned_record[key] = value.isoformat()
+                    # Handle other types
+                    else:
+                        try:
+                            # Try to convert to native Python type
+                            cleaned_record[key] = value.item() if hasattr(value, 'item') else value
+                        except:
+                            # Fallback to string representation
+                            cleaned_record[key] = str(value)
+                cleaned_records.append(cleaned_record)
+            return cleaned_records
+
+        # Get and clean preview data
+        preview_df = df.head(rows)
+        cleaned_preview = clean_preview_data(preview_df)
+
+        # Clean column names
+        cleaned_columns = [str(col) for col in df.columns.tolist()]
+
+        print(f"Preview data cleaned successfully. Rows: {len(cleaned_preview)}")
+
         return {
             "file_id": file_id,
-            "preview": df.head(rows).to_dict(orient="records"),
-            "columns": list(df.columns),
+            "preview": cleaned_preview,
+            "columns": cleaned_columns,
             "shape": {"rows": len(df), "columns": len(df.columns)}
         }
 
     except Exception as e:
         print(f"Preview error: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Preview failed: {str(e)}")

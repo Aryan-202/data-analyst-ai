@@ -3,6 +3,7 @@ import numpy as np
 from scipy import stats
 from typing import Dict, Any, List
 import warnings
+from utils import logger
 
 warnings.filterwarnings('ignore')
 
@@ -17,17 +18,35 @@ class EDAEngine:
             'trends': self._analyze_trends
         }
 
-    async def analyze_dataset(self, file_path: str, analysis_types: List[str]) -> Dict[str, Any]:
-        """Perform comprehensive EDA"""
-        df = pd.read_csv(file_path)
+    async def analyze_dataset(self, df: pd.DataFrame, analysis_types: List[str]) -> Dict[str, Any]:
+        """Perform comprehensive EDA on dataset"""
         results = {}
 
-        for analysis_type in analysis_types:
-            if analysis_type in self.analysis_methods:
-                results[analysis_type] = await self.analysis_methods[analysis_type](df)
+        # Validate analysis types
+        valid_analysis_types = [at for at in analysis_types if at in self.analysis_methods]
+        invalid_analysis_types = [at for at in analysis_types if at not in self.analysis_methods]
 
-        # FIX: Convert all numpy types to native Python types
-        results = self._convert_numpy_types(results)
+        if invalid_analysis_types:
+            logger.warning(f"Invalid analysis types requested: {invalid_analysis_types}")
+
+        # Perform requested analyses
+        for analysis_type in valid_analysis_types:
+            try:
+                logger.info(f"Performing {analysis_type} analysis...")
+                results[analysis_type] = await self.analysis_methods[analysis_type](df)
+            except Exception as e:
+                logger.error(f"Analysis '{analysis_type}' failed: {str(e)}")
+                results[analysis_type] = {
+                    'error': f"Analysis failed: {str(e)}",
+                    'traceback': str(e)
+                }
+
+        # Always generate basic dataset info
+        if 'summary' not in results:
+            try:
+                results['summary'] = await self._generate_summary(df)
+            except Exception as e:
+                results['summary'] = {'error': f"Summary generation failed: {str(e)}"}
 
         return results
 
@@ -130,38 +149,66 @@ class EDAEngine:
         }
 
     async def _detect_outliers(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Detect outliers in numeric columns"""
-        numeric_df = df.select_dtypes(include=[np.number])
+        """Detect outliers in numeric columns using IQR method"""
         outliers_report = {}
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
 
-        for column in numeric_df.columns:
-            col_data = numeric_df[column].dropna()
+        for col in numeric_cols:
+            try:
+                # Remove null values for this column
+                col_data = df[col].dropna()
 
-            # IQR method
-            Q1 = float(col_data.quantile(0.25))  # Convert to Python float
-            Q3 = float(col_data.quantile(0.75))  # Convert to Python float
-            IQR = float(Q3 - Q1)  # Convert to Python float
-            lower_bound = float(Q1 - 1.5 * IQR)  # Convert to Python float
-            upper_bound = float(Q3 + 1.5 * IQR)  # Convert to Python float
+                # Skip if no data or only one value
+                if len(col_data) < 2:
+                    outliers_report[col] = {
+                        'outlier_count': 0,
+                        'outliers_percentage': 0.0,
+                        'message': 'Insufficient data for outlier detection'
+                    }
+                    continue
 
-            outliers = col_data[(col_data < lower_bound) | (col_data > upper_bound)]
+                # Calculate IQR
+                Q1 = col_data.quantile(0.25)
+                Q3 = col_data.quantile(0.75)
+                IQR = Q3 - Q1
 
-            # Z-score method
-            z_scores = np.abs(stats.zscore(col_data))
-            z_outliers = col_data[z_scores > 3]
+                # Skip if IQR is zero (all values are same)
+                if IQR == 0:
+                    outliers_report[col] = {
+                        'outlier_count': 0,
+                        'outliers_percentage': 0.0,
+                        'message': 'No variability in data (IQR=0)'
+                    }
+                    continue
 
-            outliers_report[column] = {
-                'iqr_method': {
-                    'outliers_count': int(len(outliers)),  # Convert to Python int
-                    'outliers_percentage': float((len(outliers) / len(col_data)) * 100),  # Convert to Python float
-                    'lower_bound': lower_bound,
-                    'upper_bound': upper_bound
-                },
-                'zscore_method': {
-                    'outliers_count': int(len(z_outliers)),  # Convert to Python int
-                    'outliers_percentage': float((len(z_outliers) / len(col_data)) * 100)  # Convert to Python float
+                # Define bounds
+                lower_bound = Q1 - 1.5 * IQR
+                upper_bound = Q3 + 1.5 * IQR
+
+                # Detect outliers
+                outliers = col_data[(col_data < lower_bound) | (col_data > upper_bound)]
+
+                # Calculate percentage safely
+                total_count = len(col_data)
+                outlier_count = len(outliers)
+                outlier_percentage = (outlier_count / total_count) * 100 if total_count > 0 else 0
+
+                outliers_report[col] = {
+                    'outlier_count': outlier_count,
+                    'outliers_percentage': round(outlier_percentage, 2),
+                    'lower_bound': float(lower_bound),
+                    'upper_bound': float(upper_bound),
+                    'total_values': total_count,
+                    'outlier_values': outliers.tolist()[:10]  # First 10 outliers
                 }
-            }
+
+            except Exception as e:
+                logger.warning(f"Error detecting outliers for column '{col}': {str(e)}")
+                outliers_report[col] = {
+                    'outlier_count': 0,
+                    'outliers_percentage': 0.0,
+                    'error': f"Outlier detection failed: {str(e)}"
+                }
 
         return outliers_report
 
@@ -267,3 +314,38 @@ class EDAEngine:
             return None
         else:
             return obj
+
+    def _validate_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Validate dataframe before analysis"""
+        validation_report = {
+            'is_valid': True,
+            'issues': [],
+            'warnings': []
+        }
+
+        # Check if dataframe is empty
+        if df.empty:
+            validation_report['is_valid'] = False
+            validation_report['issues'].append("DataFrame is empty")
+            return validation_report
+
+        # Check for all null columns
+        all_null_cols = df.columns[df.isnull().all()].tolist()
+        if all_null_cols:
+            validation_report['warnings'].append(f"Columns with all null values: {all_null_cols}")
+
+        # Check for single value columns
+        single_value_cols = []
+        for col in df.columns:
+            if df[col].nunique() <= 1:
+                single_value_cols.append(col)
+
+        if single_value_cols:
+            validation_report['warnings'].append(f"Columns with single value: {single_value_cols}")
+
+        # Check for numeric columns
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if not numeric_cols:
+            validation_report['warnings'].append("No numeric columns found for statistical analysis")
+
+        return validation_report
