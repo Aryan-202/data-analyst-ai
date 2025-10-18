@@ -8,9 +8,9 @@ python-dotenv==1.0.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
-# Data Processing
-pandas==2.1.4
-numpy==1.24.3
+# Data Processing - UPDATED for Python 3.13 compatibility
+pandas==2.2.0  # Updated to latest version with Python 3.13 support
+numpy==1.26.0
 openpyxl==3.1.2
 
 # Machine Learning
@@ -35,10 +35,14 @@ reportlab==4.0.6
 python-pptx==0.6.21
 
 # Authentication & Security
-python-jose==3.3.0
-passlib==1.7.4
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
 bcrypt==4.1.2
 
 # Utilities
 python-magic==0.4.27
 requests==2.31.0
+
+# Additional dependencies for Python 3.13 compatibility
+typing-extensions==4.8.0
+anyio==4.0.0
