@@ -9,7 +9,7 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # Data Processing - UPDATED for Python 3.13 compatibility
-pandas==2.2.0  # Updated to latest version with Python 3.13 support
+pandas==2.2.0
 numpy==2.3.4
 openpyxl==3.1.2
 
