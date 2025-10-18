@@ -1,43 +1,43 @@
 # Core Framework
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.6
+fastapi==0.119.0
+uvicorn==0.37.0
+python-multipart==0.0.20
 
 # Environment & Configuration
-python-dotenv==1.0.0
+python-dotenv==1.1.1
 pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # Data Processing - UPDATED for Python 3.13 compatibility
 pandas==2.2.0  # Updated to latest version with Python 3.13 support
-numpy==1.26.0
+numpy==2.3.4
 openpyxl==3.1.2
 
 # Machine Learning
-scikit-learn==1.3.2
+scikit-learn==1.7.2
 
 # Visualization
-plotly==5.17.0
+plotly==6.3.1
 matplotlib==3.8.2
 seaborn==0.13.0
 
 # AI/LLM Integration
-openai==1.3.7
-langchain==0.0.354
+openai==2.5.0
+langchain==1.0.0
 
 # Database
-sqlalchemy==2.0.23
-aiosqlite==0.19.0
+sqlalchemy==2.0.44
+aiosqlite==0.21.0
 
 # File Processing & Reports
-aiofiles==23.2.1
+aiofiles==25.1.0
 reportlab==4.0.6
-python-pptx==0.6.21
+python-pptx==1.0.2
 
 # Authentication & Security
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.1.2
+bcrypt==5.0.0
 
 # Utilities
 python-magic==0.4.27
