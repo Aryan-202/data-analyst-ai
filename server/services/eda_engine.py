@@ -3,9 +3,10 @@ import numpy as np
 from scipy import stats
 from typing import Dict, Any, List
 import warnings
-from utils import logger
+from utils.logger import setup_logger
 
 warnings.filterwarnings('ignore')
+logger = setup_logger(__name__)
 
 
 class EDAEngine:

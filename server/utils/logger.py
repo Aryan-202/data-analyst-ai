@@ -31,7 +31,7 @@ def setup_logger(name: str, level: int = logging.INFO) -> logging.Logger:
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # File handler - FIXED: Use the correct path and create directory
+    # File handler
     log_file = os.path.join(log_dir, f"data_analyst_ai_{datetime.now().strftime('%Y%m%d')}.log")
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(level)
